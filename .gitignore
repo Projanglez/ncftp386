@@ -15,6 +15,10 @@ src/*.obj
 # Release-Pakete (gehoeren in GitHub-Releases, nicht ins Repo)
 *.zip
 
+# Laufzeitdatei: gemerkte FTP-Verbindung (wird neben der EXE angelegt)
+*.SAV
+*.sav
+
 # Watcom temporaere Dateien
 *.ERR
 *.err

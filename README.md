@@ -69,6 +69,40 @@ REM Englische Oberflaeche erzwingen:
 NCFTP.EXE EN
 ```
 
+### Kommandozeilen-Parameter
+
+```
+NCFTP [EN] [-h HOST] [-p PORT] [-u USER] [-w PASS] [-n]   (oder /?)
+```
+
+| Parameter | Bedeutung |
+|-----------|-----------|
+| `EN` | englische Oberfläche erzwingen |
+| `-h HOST` | beim Start automatisch mit HOST verbinden |
+| `-p PORT` | Port (Vorgabe 21) |
+| `-u USER` | Benutzername (Vorgabe `anonymous`) |
+| `-w PASS` | Passwort |
+| `-n` | diese Verbindung **nicht** in `NCFTP.SAV` speichern |
+| `/?` | Kurzhilfe anzeigen |
+
+So lassen sich für verschiedene Server kleine Batchdateien schreiben, z. B.:
+
+```bat
+NCFTP -h ftp.example.org -u bjoern -w geheim
+```
+
+### Gespeicherte Verbindung
+
+Nach einer erfolgreichen Verbindung werden Host/Port/Benutzer (und auf Wunsch
+das Passwort) in `NCFTP.SAV` **neben der EXE** abgelegt und beim nächsten Start
+vorbefüllt. Beim Verbinden über den Dialog fragt das Programm, ob das Passwort
+mitgespeichert werden soll (Vorgabe: ja).
+
+**Sicherheitshinweis:** Das gespeicherte Passwort ist nur leicht verschleiert
+(XOR + Hex) — das verhindert flüchtiges Mitlesen, ist aber **keine echte
+Verschlüsselung**. FTP überträgt das Passwort ohnehin im Klartext. Ein per
+`-w` übergebenes Passwort steht zudem **im Klartext in der Batchdatei**.
+
 ## Tastenbelegung (Auszug)
 
 | Taste | Funktion |

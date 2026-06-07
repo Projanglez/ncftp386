@@ -109,6 +109,26 @@ void Panel::clamp_scroll()
 
 void Panel::move_up()    { cursor--;                clamp_scroll(); }
 void Panel::move_down()  { cursor++;                clamp_scroll(); }
+
+/* Flimmerfreie Cursor-Bewegung: nur die zwei betroffenen Zeilen neu zeichnen,
+ * sofern nicht gescrollt wurde (dann ist ein Vollaufbau noetig). */
+void Panel::move_step(int delta)
+{
+    int old_cursor = cursor;
+    int old_top    = topentry;
+
+    cursor += delta;
+    clamp_scroll();
+
+    if (topentry != old_top) {        /* am Rand gescrollt -> alles neu */
+        draw();
+        return;
+    }
+    if (cursor != old_cursor) {       /* nur alte + neue Cursorzeile */
+        draw_entry_row(old_cursor);
+        draw_entry_row(cursor);
+    }
+}
 void Panel::page_up()    { cursor -= visible_rows();clamp_scroll(); }
 void Panel::page_down()  { cursor += visible_rows();clamp_scroll(); }
 void Panel::move_home()  { cursor = 0;  topentry = 0; clamp_scroll(); }
@@ -129,10 +149,24 @@ PanelEntry *Panel::entry_at(int i)
 /* --- Mehrfachauswahl ---------------------------------------------------- */
 void Panel::toggle_mark()
 {
-    PanelEntry *e = selected();
+    int marked_idx = cursor;
+    int old_top    = topentry;
+    PanelEntry *e  = selected();
+
     if (e && !e->is_parent)
         e->marked = (unsigned char)(e->marked ? 0 : 1);
-    move_down();                 /* wie Norton Commander: weiter nach unten */
+
+    cursor++;                    /* wie Norton Commander: weiter nach unten */
+    clamp_scroll();
+
+    if (topentry != old_top) {   /* gescrollt -> alles neu */
+        draw();
+        return;
+    }
+    /* markierte (alte) Zeile + ggf. neue Cursorzeile flimmerfrei neu malen */
+    draw_entry_row(marked_idx);
+    if (cursor != marked_idx)
+        draw_entry_row(cursor);
 }
 
 void Panel::clear_marks()
@@ -212,6 +246,37 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
 /* -------------------------------------------------------------------------
  * Zeichnen
  * ---------------------------------------------------------------------- */
+
+/* Eine einzelne Eintragszeile (entry-Index idx) neu zeichnen. Liegt idx
+ * ausserhalb des sichtbaren Fensters, passiert nichts. Leere Zeilen (idx jen-
+ * seits der Liste) werden in Panelfarbe geleert. Basis fuer den flimmerfreien
+ * Cursor-Redraw und fuer den Voll-draw(). */
+void Panel::draw_entry_row(int idx)
+{
+    int  inner = width - 2;
+    int  vr    = visible_rows();
+    int  rel   = idx - topentry;
+    int  row;
+    char buf[PANEL_HEADER_MAX];
+
+    if (inner < 1) return;
+    if (rel < 0 || rel >= vr) return;        /* nicht sichtbar */
+    row = top + 4 + rel;
+
+    if (idx >= 0 && idx < count) {
+        int is_cur = (active && idx == cursor);
+        int is_mk  = entries[idx].marked;
+        unsigned char a;
+        if (is_cur) a = is_mk ? ATTR_MARKED_SEL : ATTR_SELECTED;
+        else        a = is_mk ? ATTR_MARKED     : ATTR_PANEL;
+        fill_rect(row, left + 1, 1, inner, ' ', a);
+        format_entry(&entries[idx], buf, inner);
+        draw_text(row, left + 1, buf, a, inner);
+    } else {
+        fill_rect(row, left + 1, 1, inner, ' ', ATTR_PANEL);
+    }
+}
+
 void Panel::draw()
 {
     int inner = width - 2;
@@ -256,21 +321,6 @@ void Panel::draw()
     }
 
     /* 5) Eintraege (Zeilen top+4 .. top+height-2). */
-    for (i = 0; i < vr; i++) {
-        int row = top + 4 + i;
-        int idx = topentry + i;
-        unsigned char a;
-
-        if (idx < count) {
-            int is_cur = (active && idx == cursor);
-            int is_mk  = entries[idx].marked;
-            if (is_cur) a = is_mk ? ATTR_MARKED_SEL : ATTR_SELECTED;
-            else        a = is_mk ? ATTR_MARKED     : ATTR_PANEL;
-            fill_rect(row, left + 1, 1, inner, ' ', a);
-            format_entry(&entries[idx], buf, inner);
-            draw_text(row, left + 1, buf, a, inner);
-        } else {
-            fill_rect(row, left + 1, 1, inner, ' ', ATTR_PANEL);
-        }
-    }
+    for (i = 0; i < vr; i++)
+        draw_entry_row(topentry + i);
 }

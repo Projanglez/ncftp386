@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <direct.h>
 #include <dos.h>
+#include <ctype.h>
 
 #include "tui.h"
 #include "panel.h"
@@ -29,6 +30,7 @@
 #include "dialog.h"
 #include "viewer.h"
 #include "dircopy.h"
+#include "connsave.h"
 #include "i18n.h"
 
 /* ---- Bildschirm-Layout ---- */
@@ -51,6 +53,17 @@ static Panel      *g_active = 0;
  * mTCP-Stack erfolgreich initialisiert wurde. */
 static FtpClient g_ftp;
 static int       g_ftp_ready = 0;
+
+/* Verbindungsdaten der zuletzt genutzten/gemerkten Verbindung. Auf Datei-Ebene,
+ * damit main() (Laden aus NCFTP.SAV, Kommandozeile) und do_connect() (Dialog,
+ * Speichern) gemeinsam darauf zugreifen. */
+static char g_host[FTP_HOST_MAX] = "";
+static char g_portStr[8]         = "21";
+static char g_user[40]           = "anonymous";
+static char g_pass[40]           = "";
+static int  g_savepw      = 1;   /* Opt-out: Passwort standardmaessig merken   */
+static int  g_nosave      = 0;   /* -n: diese Sitzung nicht in NCFTP.SAV ablegen*/
+static int  g_autoconnect = 0;   /* per Kommandozeile (-h) automatisch verbinden*/
 
 /* Kritischer-Fehler-Handler (INT 24h): verhindert die DOS-Abfrage
  * "Abort, Retry, Fail?" - z.B. bei einem leeren Diskettenlaufwerk. Statt den
@@ -202,19 +215,35 @@ static void redraw_all(void)
 
 /* -------------------------------------------------------------------------
  * F2 - FTP-Verbindung herstellen / trennen
- * Verbindungsdaten werden ueber vier nacheinander gezeigte Eingabefelder
- * abgefragt (Host/Port/Benutzer/Passwort) und fuer die naechste Sitzung
- * gemerkt. Die eigentliche Verbindung ist blockierend.
+ * Verbindungsdaten stehen in g_host/g_portStr/g_user/g_pass (aus NCFTP.SAV oder
+ * der Kommandozeile vorbelegt, im Dialog editierbar). Bei Erfolg werden sie -
+ * sofern nicht per -n unterdrueckt - wieder gespeichert (Passwort nur, wenn
+ * g_savepw gesetzt ist). Die eigentliche Verbindung ist blockierend.
  * ---------------------------------------------------------------------- */
-static void do_connect(void)
+
+/* Verbindung mit den aktuellen g_*-Daten aufbauen. Bei Erfolg: rechtes Panel
+ * listen, Fokus dorthin, Daten speichern. Rueckgabe FTP_OK oder Fehlercode.
+ * Zeichnet selbst NICHT neu (Aufrufer entscheidet ueber redraw/Fehlerdialog). */
+static int perform_connect(void)
 {
-    static char host[FTP_HOST_MAX] = "";
-    static char portStr[8]         = "21";
-    static char user[40]           = "anonymous";
-    static char pass[40]           = "";
-    unsigned port;
+    unsigned port = (unsigned)atoi(g_portStr);
     int rc;
 
+    if (port == 0) port = 21;
+    flash_status(L(" Verbinde mit FTP-Server ...", " Connecting to FTP server ..."));
+
+    rc = g_ftp.connect(g_host, port, g_user, g_pass);
+    if (rc != FTP_OK) return rc;
+
+    g_right.refresh();
+    set_active((Panel *)&g_right);
+    if (!g_nosave)
+        connsave_store(g_host, g_portStr, g_user, g_pass, g_savepw);
+    return FTP_OK;
+}
+
+static void do_connect(void)
+{
     if (!g_ftp_ready) {
         dlg_error(L("FTP nicht verfuegbar", "FTP unavailable"),
                   L("TCP/IP konnte nicht gestartet werden.\n"
@@ -237,28 +266,24 @@ static void do_connect(void)
         return;
     }
 
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Host:", host, FTP_HOST_MAX - 1, 0)) { redraw_all(); return; }
-    if (host[0] == '\0')                                                                        { redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Port:", portStr, 6, 0))              { redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Benutzer:", "User:"), user, 38, 0)){ redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Passwort:", "Password:"), pass, 38, 1)) { redraw_all(); return; }
+    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Host:", g_host, FTP_HOST_MAX - 1, 0)) { redraw_all(); return; }
+    if (g_host[0] == '\0')                                                                        { redraw_all(); return; }
+    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Port:", g_portStr, 6, 0))              { redraw_all(); return; }
+    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Benutzer:", "User:"), g_user, 38, 0)){ redraw_all(); return; }
+    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Passwort:", "Password:"), g_pass, 38, 1)) { redraw_all(); return; }
 
-    port = (unsigned)atoi(portStr);
-    if (port == 0) port = 21;
+    /* Opt-out: Host/Port/Benutzer werden immer gemerkt; nur fuers Passwort
+     * fragen wir nach. Vorgabe = zuletzt getroffene Wahl (frisch: Ja). */
+    g_savepw = dlg_confirm_def(L("Speichern", "Save"),
+                               L("Passwort mitspeichern?", "Save the password too?"),
+                               g_savepw);
 
     redraw_all();
-    flash_status(L(" Verbinde mit FTP-Server ...", " Connecting to FTP server ..."));
-
-    rc = g_ftp.connect(host, port, user, pass);
-    if (rc != FTP_OK) {
+    if (perform_connect() != FTP_OK) {
         dlg_error(L("Verbindung fehlgeschlagen", "Connection failed"), g_ftp.last_error());
         redraw_all();
         return;
     }
-
-    /* Erfolg: rechtes Panel listet das Remote-Verzeichnis, Fokus dorthin. */
-    g_right.refresh();
-    set_active((Panel *)&g_right);
     redraw_all();
 }
 
@@ -833,6 +858,32 @@ static void do_drives(void)
     redraw_all();
 }
 
+/* Kurzhilfe (/?) auf stdout - laeuft vor tui_init, daher normale Ausgabe. */
+static void print_usage(void)
+{
+    if (g_english) {
+        printf("NCFTP386 - Norton Commander style FTP client for DOS\n\n");
+        printf("Usage: NCFTP [EN] [-h HOST] [-p PORT] [-u USER] [-w PASS] [-n]\n\n");
+        printf("  EN        force English user interface\n");
+        printf("  -h HOST   connect to HOST automatically on startup\n");
+        printf("  -p PORT   port (default 21)\n");
+        printf("  -u USER   user name (default anonymous)\n");
+        printf("  -w PASS   password  (WARNING: stored in cleartext in the batch file)\n");
+        printf("  -n        do not save this connection to NCFTP.SAV\n");
+        printf("  /?        this help\n");
+    } else {
+        printf("NCFTP386 - FTP-Client im Norton-Commander-Stil fuer DOS\n\n");
+        printf("Aufruf: NCFTP [EN] [-h HOST] [-p PORT] [-u USER] [-w PASS] [-n]\n\n");
+        printf("  EN        englische Oberflaeche erzwingen\n");
+        printf("  -h HOST   beim Start automatisch mit HOST verbinden\n");
+        printf("  -p PORT   Port (Vorgabe 21)\n");
+        printf("  -u USER   Benutzername (Vorgabe anonymous)\n");
+        printf("  -w PASS   Passwort  (ACHTUNG: steht im Klartext in der Batchdatei)\n");
+        printf("  -n        diese Verbindung nicht in NCFTP.SAV speichern\n");
+        printf("  /?        diese Hilfe\n");
+    }
+}
+
 /* -------------------------------------------------------------------------
  * Main / Event-Loop
  * ---------------------------------------------------------------------- */
@@ -844,13 +895,40 @@ int main(int argc, char *argv[])
     /* Sprache aus der DOS-Laendereinstellung bestimmen (vor jeder Ausgabe). */
     i18n_init();
 
-    /* Kommandozeile: "EN", "/EN" oder "-EN" erzwingt Englisch. */
-    for (i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        if (*a == '/' || *a == '-') a++;
-        if (a[0] == 'e' || a[0] == 'E')
-            if (a[1] == 'n' || a[1] == 'N')
-                if (a[2] == '\0') { g_english = 1; break; }
+    /* Gemerkte Verbindung laden (NCFTP.SAV neben der EXE). Fuellt g_host etc.;
+     * fehlt die Datei, bleiben die Vorgaben stehen. */
+    connsave_init(argv[0]);
+    connsave_load(g_host, (int)sizeof(g_host), g_portStr, (int)sizeof(g_portStr),
+                  g_user, (int)sizeof(g_user), g_pass, (int)sizeof(g_pass), &g_savepw);
+
+    /* Kommandozeile parsen (ueberschreibt die geladenen Werte):
+     *   EN  -> Englisch    -h/-p/-u/-w -> Verbindungsdaten + Auto-Connect (bei -h)
+     *   -n  -> nicht speichern         /? -> Hilfe und beenden
+     * Prefix '-' und '/' beide erlaubt; Wert folgt als naechstes Argument. */
+    {
+        int want_help = 0;
+        for (i = 1; i < argc; i++) {
+            const char *o = argv[i];
+            char f;
+            if (*o == '/' || *o == '-') o++;
+
+            if ((o[0] == 'e' || o[0] == 'E') && (o[1] == 'n' || o[1] == 'N') && o[2] == '\0') {
+                g_english = 1; continue;
+            }
+            if (o[0] == '?' && o[1] == '\0') { want_help = 1; continue; }
+
+            f = (char)tolower((unsigned char)o[0]);
+            if (o[1] == '\0' && (f == 'h' || f == 'p' || f == 'u' || f == 'w')) {
+                const char *val = (i + 1 < argc) ? argv[++i] : "";
+                if      (f == 'h') { strncpy(g_host,    val, sizeof(g_host)    - 1); g_host[sizeof(g_host) - 1]       = 0; g_autoconnect = 1; }
+                else if (f == 'p') { strncpy(g_portStr, val, sizeof(g_portStr) - 1); g_portStr[sizeof(g_portStr) - 1] = 0; }
+                else if (f == 'u') { strncpy(g_user,    val, sizeof(g_user)    - 1); g_user[sizeof(g_user) - 1]       = 0; }
+                else               { strncpy(g_pass,    val, sizeof(g_pass)    - 1); g_pass[sizeof(g_pass) - 1]       = 0; }
+                continue;
+            }
+            if (f == 'n' && o[1] == '\0') { g_nosave = 1; continue; }
+        }
+        if (want_help) { print_usage(); return 0; }
     }
 
     /* Kritische DOS-Fehler (leeres Laufwerk usw.) automatisch fehlschlagen
@@ -874,6 +952,38 @@ int main(int argc, char *argv[])
 
     redraw_all();
 
+    /* Auto-Connect, wenn ein Host auf der Kommandozeile stand (-h).
+     * Die allererste Verbindung direkt nach dem Start schlaegt auf echter
+     * Hardware manchmal fehl: ARP-/DNS-Cache sind kalt und der Packet-Treiber
+     * wurde gerade erst eingehaengt. Daher Stack kurz warmlaufen lassen und bei
+     * einem transienten Fehler einmal automatisch wiederholen (entspricht dem
+     * manuellen F2-Retry, der ja zuverlaessig klappt). Bei echten Fehlern
+     * (z.B. Login abgelehnt) wird NICHT wiederholt. */
+    if (g_autoconnect) {
+        if (g_ftp_ready) {
+            int attempt, rc = FTP_ERR_GENERAL;
+
+            FtpClient::stack_poll(750);            /* Treiber/Link setteln lassen */
+            for (attempt = 0; attempt < 2; attempt++) {
+                rc = perform_connect();
+                if (rc == FTP_OK) break;
+                if (rc != FTP_ERR_TIMEOUT && rc != FTP_ERR_DNS &&
+                    rc != FTP_ERR_CONNECT && rc != FTP_ERR_DATACONN) break;
+                if (attempt == 0) {
+                    flash_status(L(" Erneuter Verbindungsversuch ...",
+                                   " Retrying connection ..."));
+                    FtpClient::stack_poll(500);    /* ARP/DNS sind jetzt warm */
+                }
+            }
+            if (rc != FTP_OK)
+                dlg_error(L("Verbindung fehlgeschlagen", "Connection failed"), g_ftp.last_error());
+            redraw_all();
+        } else {
+            flash_status(L(" FTP nicht verfuegbar (MTCPCFG?).",
+                           " FTP unavailable (MTCPCFG?)."));
+        }
+    }
+
     while (running) {
         int key = readkey();
 
@@ -886,15 +996,15 @@ int main(int argc, char *argv[])
             draw_statusbar();
             break;
 
-        case KEY_UP:   g_active->move_up();   g_active->draw(); draw_statusbar(); break;
-        case KEY_DOWN: g_active->move_down(); g_active->draw(); draw_statusbar(); break;
+        case KEY_UP:   g_active->move_step(-1); draw_statusbar(); break;
+        case KEY_DOWN: g_active->move_step(+1); draw_statusbar(); break;
         case KEY_PGUP: g_active->page_up();   g_active->draw(); draw_statusbar(); break;
         case KEY_PGDN: g_active->page_down(); g_active->draw(); draw_statusbar(); break;
         case KEY_HOME: g_active->move_home(); g_active->draw(); draw_statusbar(); break;
         case KEY_END:  g_active->move_end();  g_active->draw(); draw_statusbar(); break;
 
         case KEY_INS:  /* Markierung umschalten + Cursor nach unten (Norton-Stil) */
-            g_active->toggle_mark(); g_active->draw(); draw_statusbar(); break;
+            g_active->toggle_mark(); draw_statusbar(); break;
 
         case KEY_ENTER:
             if (g_active->enter_selected()) {

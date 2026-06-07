@@ -150,13 +150,13 @@ void dlg_error(const char *title, const char *msg)
 /* -------------------------------------------------------------------------
  * Ja/Nein-Abfrage
  * ---------------------------------------------------------------------- */
-int dlg_confirm(const char *title, const char *msg)
+int dlg_confirm_def(const char *title, const char *msg, int default_yes)
 {
     char lines[DLG_MAX_LINES][72];
     int nlines = split_lines(msg, lines);
     int w = 0, i, cols, rows, top, left;
     int btnrow, bw_ja, bw_nein, gap = 3, btotal, b0;
-    int focus = 1;                   /* Default: "Nein" (sicherer) */
+    int focus = default_yes ? 0 : 1; /* 0 = "Ja", 1 = "Nein" (Default sicher) */
     int result;
     unsigned char bg = ATTR_DIALOG_BG;
     const char *lbl_yes = L("Ja", "Yes");
@@ -203,6 +203,11 @@ int dlg_confirm(const char *title, const char *msg)
     }
     restore_screen(dlg_screen);
     return result;
+}
+
+int dlg_confirm(const char *title, const char *msg)
+{
+    return dlg_confirm_def(title, msg, 0);   /* Vorgabe: "Nein" */
 }
 
 /* -------------------------------------------------------------------------

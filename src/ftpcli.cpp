@@ -83,6 +83,12 @@ void FtpClient::shutdown_stack(void) {
     }
 }
 
+void FtpClient::stack_poll(unsigned ms) {
+    clockTicks_t start = TIMER_GET_CURRENT();
+    while (elapsedMs(start) < (unsigned long)ms)
+        driveStack();
+}
+
 
 /* ===================================================================== */
 /* Konstruktor / Fehlerhilfen                                            */

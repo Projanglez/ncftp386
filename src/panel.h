@@ -66,6 +66,11 @@ public:
     void move_home();
     void move_end();
 
+    /* Cursor um delta (+1/-1) bewegen und FLIMMERFREI zeichnen: bei reiner
+     * Bewegung innerhalb des sichtbaren Bereichs werden nur die alte und die
+     * neue Cursorzeile neu gemalt; nur beim Scrollen am Rand der Vollaufbau. */
+    void move_step(int delta);
+
     /* Aktuell markierter Eintrag (0 falls Liste leer). */
     PanelEntry *selected();
     int         selected_index() const { return cursor; }
@@ -104,6 +109,7 @@ protected:
     /* --- Hilfsfunktionen --- */
     int  visible_rows() const;   /* Anzahl sichtbarer Eintragszeilen      */
     void clamp_scroll();         /* topentry so anpassen, dass cursor sichtbar */
+    void draw_entry_row(int idx);/* nur eine Eintragszeile (idx) neu zeichnen */
     void format_entry(const PanelEntry *e, char *out, int inner) const;
     virtual unsigned char frame_attr() const;  /* Rahmenfarbe (ueberschreibbar) */
 };

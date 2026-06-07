@@ -63,6 +63,11 @@ public:
     static int  init_stack(void);
     static void shutdown_stack(void);
 
+    /* Den mTCP-Stack 'ms' Millisekunden lang treiben, ohne etwas zu senden.
+     * Zum "Warmlaufen" direkt nach init_stack (Treiber/Link setteln lassen),
+     * bevor die allererste Verbindung aufgebaut wird. */
+    static void stack_poll(unsigned ms);
+
     /* Steuerverbindung aufbauen + einloggen (USER/PASS). */
     int  connect(const char *host, unsigned port,
                  const char *user, const char *pass);
