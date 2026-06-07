@@ -12,6 +12,9 @@ src/*.obj
 *.exe
 *.map
 
+# Release-Pakete (gehoeren in GitHub-Releases, nicht ins Repo)
+*.zip
+
 # Watcom temporaere Dateien
 *.ERR
 *.err

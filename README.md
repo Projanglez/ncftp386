@@ -39,10 +39,12 @@ tastaturgesteuert im 80×25-Textmodus.
 ## Bauen
 
 mTCP ist eine **externe Abhängigkeit** und nicht Teil dieses Repositorys.
-Zuerst den verwendeten Fork in den Ordner `mtcp/` klonen:
+Zuerst den verwendeten Fork in den Ordner `mtcp/` klonen und auf den exakten
+Commit setzen, gegen den dieses Projekt gebaut und getestet wurde:
 
 ```sh
 git clone https://github.com/retrohun/mTCP mtcp
+git -C mtcp checkout ad9cd0f
 ```
 
 Dann mit Open Watcom bauen:
@@ -87,4 +89,14 @@ Dieses Projekt steht unter der **GNU General Public License v3.0** (siehe
 [`LICENSE`](LICENSE)). Es linkt statisch die mTCP-Bibliothek, die ebenfalls
 unter der GPLv3 steht.
 
+### Drittanbieter-Code / korrespondierender Quellcode
+
 mTCP © Michael B. Brutman — <https://www.brutman.com/mTCP/>
+
+Verwendet wird der Fork **[retrohun/mTCP](https://github.com/retrohun/mTCP)**,
+unverändert beim Commit
+[`ad9cd0f`](https://github.com/retrohun/mTCP/commit/ad9cd0f87ab151a1ce6f1a279f306bdf94163b21)
+(20.08.2018). Genau dieser Stand bildet zusammen mit dem Code dieses Repositorys
+den vollständigen korrespondierenden Quellcode der verteilten Binärdatei
+(GPLv3 §6). Bei veröffentlichten Releases liegt eine Kopie dieser mTCP-Quellen
+als zusätzliches Asset bei.
