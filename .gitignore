@@ -15,3 +15,7 @@ src/*.obj
 # Watcom temporaere Dateien
 *.ERR
 *.err
+
+# Editor- und Tooling-Konfiguration (lokal, gehoert nicht ins Repo)
+.claude/
+.vscode/
