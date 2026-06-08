@@ -6,6 +6,8 @@ connects to an FTP server via the
 [mTCP](https://github.com/retrohun/mTCP) TCP/IP stack — fully
 keyboard-driven in 80×25 text mode.
 
+![NCFTP386 downloading DOOM.EXE](docs/screenshot.png)
+
 ```
 +=====================+        +=====================+
 | C:\GAMES            |        | ftp.example.org /pub|
