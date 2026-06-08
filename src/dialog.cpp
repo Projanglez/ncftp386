@@ -11,6 +11,7 @@
 #include "tui.h"
 #include "keymap.h"
 #include "i18n.h"
+#include "umlaut.h"   /* immer als letzter Include */
 
 /* Puffer fuer den gesicherten Bildschirm hinter dem Dialog (4000 Bytes). */
 static unsigned char dlg_screen[SCREEN_CELLS * 2];
@@ -357,7 +358,7 @@ void dlg_progress_update(unsigned long sofar, unsigned long total)
         unsigned long unit = sofar >> 13;
         if (unit == prog_lastunit) return;
         prog_lastunit = unit;
-        sprintf(buf, L("%lu Bytes uebertragen ...", "%lu bytes transferred ..."), sofar);
+        sprintf(buf, L("%lu Bytes " ue "bertragen ...", "%lu bytes transferred ..."), sofar);
         fill_rect(prog_barrow, prog_left + 2, 1, prog_cols - 4, ' ', ATTR_DIALOG_BG);
         draw_text(prog_barrow, prog_left + 2, buf, ATTR_DIALOG_BG, prog_cols - 4);
     }
