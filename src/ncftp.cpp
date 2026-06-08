@@ -65,6 +65,7 @@ static char g_portStr[8]         = "21";
 static char g_user[40]           = "anonymous";
 static char g_pass[40]           = "";
 static int  g_savepw      = 1;   /* Opt-out: Passwort standardmaessig merken   */
+static int  g_saveconn    = 1;   /* Verbindungsdaten ueberhaupt speichern      */
 static int  g_nosave      = 0;   /* -n: diese Sitzung nicht in NCFTP.SAV ablegen*/
 static int  g_autoconnect = 0;   /* per Kommandozeile (-h) automatisch verbinden*/
 
@@ -246,10 +247,10 @@ static void redraw_all(void)
 static void handle_disconnect(void)
 {
     g_right.refresh();              /* zeigt "(nicht verbunden)" */
-    g_right.draw();
-    draw_clock();
-    flash_status(L(" Verbindung vom Server getrennt.",
-                   " Server closed the connection."));
+    redraw_all();                   /* UI vollstaendig aktuell vor dem Popup */
+    dlg_error(L("Verbindung getrennt", "Connection lost"),
+              L("Der Server hat die Verbindung beendet.",
+                "The server closed the connection."));
 }
 
 /* -------------------------------------------------------------------------
@@ -276,7 +277,7 @@ static int perform_connect(void)
 
     g_right.refresh();
     set_active((Panel *)&g_right);
-    if (!g_nosave)
+    if (g_saveconn && !g_nosave)
         connsave_store(g_host, g_portStr, g_user, g_pass, g_savepw);
     return FTP_OK;
 }
@@ -305,17 +306,14 @@ static void do_connect(void)
         return;
     }
 
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Host:", g_host, FTP_HOST_MAX - 1, 0)) { redraw_all(); return; }
-    if (g_host[0] == '\0')                                                                        { redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), "Port:", g_portStr, 6, 0))              { redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Benutzer:", "User:"), g_user, 38, 0)){ redraw_all(); return; }
-    if (!dlg_input(L("FTP-Verbindung", "FTP Connection"), L("Passwort:", "Password:"), g_pass, 38, 1)) { redraw_all(); return; }
-
-    /* Opt-out: Host/Port/Benutzer werden immer gemerkt; nur fuers Passwort
-     * fragen wir nach. Vorgabe = zuletzt getroffene Wahl (frisch: Ja). */
-    g_savepw = dlg_confirm_def(L("Speichern", "Save"),
-                               L("Passwort mitspeichern?", "Save the password too?"),
-                               g_savepw);
+    if (!dlg_connect(L("FTP-Verbindung herstellen", "Connect to FTP Server"),
+                     g_host,    FTP_HOST_MAX - 1,
+                     g_portStr, (int)sizeof(g_portStr) - 1,
+                     g_user,    (int)sizeof(g_user) - 1,
+                     g_pass,    (int)sizeof(g_pass) - 1,
+                     &g_saveconn, &g_savepw))
+    { redraw_all(); return; }
+    if (g_host[0] == '\0') { redraw_all(); return; }
 
     redraw_all();
     if (perform_connect() != FTP_OK) {
