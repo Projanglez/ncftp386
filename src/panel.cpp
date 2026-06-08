@@ -210,6 +210,15 @@ void Panel::toggle_mark()
         draw_entry_row(cursor);
 }
 
+void Panel::invert_marks()
+{
+    int i;
+    for (i = 0; i < count; i++)
+        if (!entries[i].is_parent)
+            entries[i].marked = entries[i].marked ? 0 : 1;
+    draw();
+}
+
 void Panel::clear_marks()
 {
     int i;

@@ -42,6 +42,10 @@
 /* Alt+Funktionstasten (geheime Shortcuts). Alt+F1 liefert Scancode 0x68. */
 #define KEY_ALT_F1  0x168
 
+/* Numpad * (grauer Stern) - wie normales '*' nicht unterscheidbar, aber im
+ * Panel-Kontext unbelegt: Markierung invertieren (Norton-Commander-Stil). */
+#define KEY_STAR    0x2A
+
 /* Eine Taste lesen (blockierend). Erweiterte Tasten => 0x100 | Scancode. */
 inline int readkey(void)
 {
