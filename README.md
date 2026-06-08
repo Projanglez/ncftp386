@@ -3,7 +3,7 @@
 A Norton Commander-style **dual-panel FTP client for MS-DOS** running on real
 386 hardware. The left panel shows the local DOS filesystem; the right panel
 connects to an FTP server via the
-[mTCP](https://github.com/mbbrutman/mTCP) TCP/IP stack — fully
+[mTCP](https://github.com/retrohun/mTCP) TCP/IP stack — fully
 keyboard-driven in 80×25 text mode.
 
 ```
@@ -21,12 +21,15 @@ keyboard-driven in 80×25 text mode.
 ## Features
 
 - Two panels: local (DOS) and remote (FTP, passive mode)
-- Navigate directories, view files (F3 viewer)
+- Navigate directories; view files with F3 (or Enter) — up to 32 KB displayed
+- Remote view (F3) downloads to a temporary file first, then opens the viewer
+- Edit local text files with F4 — minimal full-screen editor (~32 KB, local only)
 - Copy in both directions (F5), including **recursive directory trees**
 - Multiple selection with the **Ins key** (Norton style) for copy/delete
 - Per-file overwrite prompts (Overwrite / Skip / All / Cancel)
 - Create (F7), rename (F6), **recursive delete** with pre-count confirmation (F8)
 - Local drive switcher (F9), lists only present drives
+- Keepalive: sends NOOP every 60 s to prevent server idle timeouts
 - Bilingual German/English UI (auto-detected from DOS country setting,
   or forced on the command line: `NCFTP386 /L:EN`)
 
@@ -64,8 +67,6 @@ A packet driver for your network card and an mTCP configuration file are require
 ```bat
 SET MTCPCFG=C:\NET\MTCP.CFG
 NCFTP386.EXE
-REM Force English UI:
-NCFTP386.EXE /L:EN
 ```
 
 ### Command-line parameters
@@ -75,7 +76,7 @@ NCFTP386 [/L:DE|EN] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/N]   (or /?)
 ```
 
 Both `/` and `-` are accepted as the flag prefix. Flags are **case-insensitive**;
-**values** are passed through as-is (username and password are case-sensitive).
+values are passed through as-is (username and password are case-sensitive).
 
 | Parameter | Description |
 |-----------|-------------|
@@ -87,22 +88,14 @@ Both `/` and `-` are accepted as the flag prefix. Flags are **case-insensitive**
 | `/N` | Do **not** save this connection to `NCFTP386.SAV` |
 | `/?` | Show brief help |
 
-This makes it easy to create small batch files for different servers, e.g.:
-
-```bat
-NCFTP386 /H:ftp.example.org /U:alice /W:secret
-```
-
 ### Saved connection
 
 After a successful connection, host/port/username (and optionally the password)
 are stored in `NCFTP386.SAV` next to the EXE and pre-filled on the next launch.
 The connect dialog asks whether to save the password (default: yes).
 
-**Security note:** The stored password is only lightly obfuscated (XOR + hex) —
-it prevents casual shoulder-surfing but is **not real encryption**. FTP transmits
-passwords in plain text anyway. A password passed via `/W` is also stored
-**in plain text in the batch file**.
+**Security note:** The stored password is lightly obfuscated (XOR + hex), not
+encrypted — and FTP transmits passwords in plain text anyway.
 
 ## Key bindings
 
@@ -111,11 +104,17 @@ passwords in plain text anyway. A password passed via `/W` is also stored
 | Tab | Switch active panel |
 | Arrow keys / PgUp PgDn | Move selection |
 | Ins | Mark entry (for multi-file copy/delete) |
-| Enter | Enter directory / view file |
+| Enter | Enter directory / view file (same as F3) |
 | Backspace | Go to parent directory |
+| F1 | Help |
 | F2 | FTP connect / disconnect |
-| F3 | View · F5 Copy · F6 Rename |
-| F7 | Create directory · F8 Delete · F9 Drive |
+| F3 | View file (local or remote; max 32 KB) |
+| F4 | Edit local file (minimal editor, ~32 KB, no undo/search) |
+| F5 | Copy (recursive for directories) |
+| F6 | Rename / move |
+| F7 | Create directory |
+| F8 | Delete (recursive with confirmation) |
+| F9 | Switch local drive |
 | F10 | Quit |
 
 ## License
@@ -138,6 +137,4 @@ additional release asset.
 
 ## Disclaimer
 
-This software is provided without any warranty.
-The author accepts no liability for data loss or damages.
-Use at your own risk. See also [LICENSE](LICENSE) (GPLv3, §15–16).
+This software is provided without any warranty; use at your own risk. See [LICENSE](LICENSE) (GPLv3, §15–16).
