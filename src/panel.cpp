@@ -18,6 +18,7 @@
 #include "panel.h"
 #include "tui.h"
 #include "i18n.h"
+#include "umlaut.h"   /* immer als letzter Include */
 
 /* -------------------------------------------------------------------------
  * Spaltenlayout
@@ -144,6 +145,27 @@ PanelEntry *Panel::entry_at(int i)
 {
     if (i < 0 || i >= count) return 0;
     return &entries[i];
+}
+
+void Panel::select_by_name(const char *name)
+{
+    int i;
+    if (name && name[0]) {
+        for (i = 0; i < count; i++) {
+            if (stricmp(entries[i].name, name) == 0) {
+                cursor = i;
+                clamp_scroll();
+                return;
+            }
+        }
+    }
+    clamp_scroll();              /* nicht gefunden -> Cursor gueltig halten */
+}
+
+void Panel::set_cursor_index(int idx)
+{
+    cursor = idx;
+    clamp_scroll();
 }
 
 /* --- Mehrfachauswahl ---------------------------------------------------- */
@@ -314,7 +336,7 @@ void Panel::draw()
         for (i = 0; i < inner; i++) buf[i] = ' ';
         buf[inner] = '\0';
         place(buf, c.name_off, L("Name", "Name"), c.name_w, 0);
-        place(buf, c.size_off, L("Groesse", "Size"), c.size_w, 1);
+        place(buf, c.size_off, L("Gr" oe "sse", "Size"), c.size_w, 1);
         place(buf, c.date_off, L("Datum", "Date"), c.date_w, 1);
         fill_rect(top + 3, left + 1, 1, inner, ' ', ATTR_PANEL);
         draw_text(top + 3, left + 1, buf, ATTR_PANEL, inner);

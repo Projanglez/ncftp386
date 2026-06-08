@@ -76,6 +76,14 @@ public:
     int         selected_index() const { return cursor; }
     int         entry_count()    const { return count; }
 
+    /* Cursor auf den Eintrag mit diesem Namen setzen (case-insensitiv). Wird er
+     * nicht gefunden, bleibt der Cursor im gueltigen Bereich. Fuer "Cursor nach
+     * der Operation auf dem Element halten". */
+    void select_by_name(const char *name);
+    /* Cursor direkt auf einen Index setzen (wird in den gueltigen Bereich
+     * geklemmt). Fuer "nach dem Loeschen in der Naehe bleiben". */
+    void set_cursor_index(int idx);
+
     /* Eintrag per Index (0 ausserhalb des gueltigen Bereichs). */
     PanelEntry *entry_at(int i);
 

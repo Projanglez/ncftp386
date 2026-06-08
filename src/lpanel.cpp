@@ -10,6 +10,18 @@
 
 #include "lpanel.h"
 
+/* Letzten Pfadbestandteil ("Blattname") ermitteln. "C:\FOO\BAR" -> "BAR",
+ * "C:\" -> "" (Wurzel hat kein Blatt). */
+static void path_leaf(const char *path, char *out, int outsz)
+{
+    const char *p, *leaf = path;
+    int n = 0;
+    for (p = path; *p; p++)
+        if (*p == '\\' || *p == '/' || *p == ':') leaf = p + 1;
+    while (leaf[n] && n < outsz - 1) { out[n] = leaf[n]; n++; }
+    out[n] = '\0';
+}
+
 LocalPanel::LocalPanel()
 {
     cwd[0] = '\0';
@@ -85,18 +97,27 @@ int LocalPanel::enter_selected()
     if (e == 0)        return 0;
     if (!e->is_dir)    return 0;
 
-    if (e->is_parent)
+    if (e->is_parent) {
+        /* Hochwechseln: danach Cursor auf das verlassene Verzeichnis. */
+        char leaf[PANEL_NAME_MAX];
+        path_leaf(cwd, leaf, sizeof(leaf));
         chdir("..");
-    else
+        refresh();
+        select_by_name(leaf);
+    } else {
         chdir(e->name);
-
-    refresh();
+        refresh();
+    }
     return 1;
 }
 
-/* Backspace: ins uebergeordnete Verzeichnis (am Wurzelverzeichnis wirkungslos). */
+/* Backspace: ins uebergeordnete Verzeichnis (am Wurzelverzeichnis wirkungslos).
+ * Danach steht der Cursor auf dem soeben verlassenen Verzeichnis. */
 void LocalPanel::go_parent()
 {
+    char leaf[PANEL_NAME_MAX];
+    path_leaf(cwd, leaf, sizeof(leaf));
     chdir("..");
     refresh();
+    select_by_name(leaf);
 }

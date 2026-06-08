@@ -97,6 +97,17 @@ static int current_year(void)
     return (int)d.year;
 }
 
+/* Letzter Pfadbestandteil eines Remote-Pfads ("/pub/games" -> "games"). */
+static void path_leaf(const char *path, char *out, int outsz)
+{
+    const char *p, *leaf = path;
+    int n = 0;
+    for (p = path; *p; p++)
+        if (*p == '/' || *p == '\\') leaf = p + 1;
+    while (leaf[n] && n < outsz - 1) { out[n] = leaf[n]; n++; }
+    out[n] = '\0';
+}
+
 /* Zeile in Tokens zerlegen (Offsets/Laengen). Rueckgabe: Anzahl Tokens. */
 static int tokenize(const char *line, int *off, int *tlen, int maxtok)
 {
@@ -338,18 +349,28 @@ int RemotePanel::enter_selected()
     if (!ftp || !ftp->is_connected()) return 0;
 
     int rc;
-    if (e->is_parent) rc = ftp->parent_dir();
-    else              rc = ftp->change_dir(e->name);
-
-    refresh();                       /* listet den (ggf. neuen) Stand */
+    if (e->is_parent) {
+        /* Hochwechseln: danach Cursor auf das verlassene Verzeichnis. */
+        char leaf[PANEL_NAME_MAX];
+        path_leaf(cwd, leaf, sizeof(leaf));
+        rc = ftp->parent_dir();
+        refresh();
+        select_by_name(leaf);
+    } else {
+        rc = ftp->change_dir(e->name);
+        refresh();                   /* listet den neuen Stand */
+    }
     if (rc != FTP_OK) navFailed = 1; /* refresh() hat navFailed zurueckgesetzt */
     return 1;
 }
 
 void RemotePanel::go_parent()
 {
+    char leaf[PANEL_NAME_MAX];
     if (!ftp || !ftp->is_connected()) return;
+    path_leaf(cwd, leaf, sizeof(leaf));
     int rc = ftp->parent_dir();
     refresh();
+    select_by_name(leaf);
     if (rc != FTP_OK) navFailed = 1;
 }
