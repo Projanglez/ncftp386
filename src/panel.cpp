@@ -31,13 +31,29 @@ struct ColLayout {
 
 static void columns(int inner, ColLayout *c)
 {
-    c->date_w   = 8;                                /* "MM-TT-JJ"            */
+    c->date_w   = 11;                               /* "MM-TT HH:MM"         */
     c->date_off = inner - c->date_w;
-    c->size_w   = 10;                               /* bis 10 Stellen / <DIR>*/
+    c->size_w   = 10;                               /* "99.999.999" + Reserve*/
     c->size_off = c->date_off - 1 - c->size_w;
     c->name_off = 1;                                /* Sp.0 = Markierung     */
     c->name_w   = c->size_off - 1 - c->name_off;
     if (c->name_w < 1) c->name_w = 1;               /* Schutz fuer Mini-Panel*/
+}
+
+/* Zahl n mit Tausenderpunkten in buf schreiben (DE: Punkt, EN: Komma). */
+static void fmt_size(char *buf, unsigned long n)
+{
+    char raw[16];
+    const char *sep = L(".", ",");
+    int len, i, pos;
+    sprintf(raw, "%lu", n);
+    len = (int)strlen(raw);
+    pos = 0;
+    for (i = 0; i < len; i++) {
+        if (i > 0 && (len - i) % 3 == 0) buf[pos++] = sep[0];
+        buf[pos++] = raw[i];
+    }
+    buf[pos] = '\0';
 }
 
 /* Text in 'out' an Offset 'off' platzieren, links- oder rechtsbuendig in der
@@ -251,16 +267,17 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
     if (e->is_dir) {
         place(out, c.size_off, "<DIR>", c.size_w, 1);
     } else {
-        sprintf(tmp, "%lu", e->size);
+        fmt_size(tmp, e->size);
         place(out, c.size_off, tmp, c.size_w, 1);
     }
 
-    /* Datum MM-TT-JJ (rechts). Beim ".."-Eintrag leer lassen. */
+    /* Datum+Zeit "MM-TT HH:MM" (rechts). Beim ".."-Eintrag leer lassen. */
     if (!e->is_parent) {
-        int year  = 1980 + (int)(e->date >> 9);
         int month = (int)((e->date >> 5) & 0x0F);
         int day   = (int)(e->date & 0x1F);
-        sprintf(tmp, "%02d-%02d-%02d", month, day, year % 100);
+        int hh    = (int)((e->time >> 11) & 0x1F);
+        int mm    = (int)((e->time >> 5)  & 0x3F);
+        sprintf(tmp, "%02d-%02d %02d:%02d", month, day, hh, mm);
         place(out, c.date_off, tmp, c.date_w, 1);
     }
 }
@@ -303,7 +320,7 @@ void Panel::draw()
 {
     int inner = width - 2;
     unsigned char fa = frame_attr();
-    unsigned char ha = active ? ATTR_HEADER : ATTR_PANEL;
+    unsigned char ha = ATTR_PANEL;   /* Pfad-Header: immer weiss auf blau */
     int vr = visible_rows();
     int i;
     char buf[PANEL_HEADER_MAX];
@@ -336,10 +353,10 @@ void Panel::draw()
         for (i = 0; i < inner; i++) buf[i] = ' ';
         buf[inner] = '\0';
         place(buf, c.name_off, L("Name", "Name"), c.name_w, 0);
-        place(buf, c.size_off, L("Gr" oe "sse", "Size"), c.size_w, 1);
-        place(buf, c.date_off, L("Datum", "Date"), c.date_w, 1);
-        fill_rect(top + 3, left + 1, 1, inner, ' ', ATTR_PANEL);
-        draw_text(top + 3, left + 1, buf, ATTR_PANEL, inner);
+        place(buf, c.size_off, L("Gr" oe ss "e", "Size"), c.size_w, 1);
+        place(buf, c.date_off, L("Datum  Zeit", "Date  Time"), c.date_w, 1);
+        fill_rect(top + 3, left + 1, 1, inner, ' ', ATTR_COLHDR);
+        draw_text(top + 3, left + 1, buf, ATTR_COLHDR, inner);
     }
 
     /* 5) Eintraege (Zeilen top+4 .. top+height-2). */
