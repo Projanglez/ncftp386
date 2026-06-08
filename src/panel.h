@@ -92,8 +92,9 @@ public:
      * Der ".."-Eintrag laesst sich nicht markieren. */
     void          toggle_mark();
     void          clear_marks();
-    int           marked_count() const;   /* Anzahl markierter Eintraege      */
-    unsigned long marked_size()  const;   /* Summe der Groessen (nur Dateien) */
+    int           marked_count()     const; /* Anzahl markierter Eintraege      */
+    unsigned long marked_size()      const; /* Summe der Groessen (nur Dateien) */
+    int           marked_dir_count() const; /* Anzahl markierter Verzeichnisse  */
 
     /* 1, falls ein Eintrag mit diesem Namen existiert (".." ausgenommen),
      * case-insensitiv. Fuer die Ueberschreiben-Abfrage beim Upload. */

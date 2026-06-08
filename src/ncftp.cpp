@@ -159,13 +159,36 @@ static void draw_statusbar(void)
     /* Markierungen haben Vorrang vor der Einzeldatei-Info. */
     if (g_active && g_active->marked_count() > 0) {
         int nm = g_active->marked_count();
+        int nd = g_active->marked_dir_count();
         unsigned long ms = g_active->marked_size();
         if (ms > 0) {
-            char num[20];
+            char num[20], hum[24];
             format_thousands(ms, num);
-            sprintf(info, L(" %d markiert   %s Bytes", " %d marked   %s bytes"), nm, num);
+            if (ms >= 1024UL) {
+                format_human(ms, hum);
+                if (nd > 0)
+                    sprintf(info, L(" %d markiert   %s Bytes %s + %d Dir(s)",
+                                    " %d marked   %s bytes %s + %d Dir(s)"),
+                            nm, num, hum, nd);
+                else
+                    sprintf(info, L(" %d markiert   %s Bytes %s",
+                                    " %d marked   %s bytes %s"),
+                            nm, num, hum);
+            } else {
+                if (nd > 0)
+                    sprintf(info, L(" %d markiert   %s Bytes + %d Dir(s)",
+                                    " %d marked   %s bytes + %d Dir(s)"),
+                            nm, num, nd);
+                else
+                    sprintf(info, L(" %d markiert   %s Bytes",
+                                    " %d marked   %s bytes"),
+                            nm, num);
+            }
         } else {
-            sprintf(info, L(" %d markiert", " %d marked"), nm);
+            if (nd > 0)
+                sprintf(info, L(" %d markiert + %d Dir(s)", " %d marked + %d Dir(s)"), nm, nd);
+            else
+                sprintf(info, L(" %d markiert", " %d marked"), nm);
         }
         draw_text(ROW_STATUS, 0, info, ATTR_STATUSBAR, SCREEN_COLS - 2 - clen);
         draw_text(ROW_STATUS, SCREEN_COLS - clen, conn, ATTR_STATUSBAR, clen);
@@ -940,29 +963,16 @@ static void do_drives(void)
 /* Kurzhilfe (/?) auf stdout - laeuft vor tui_init, daher normale Ausgabe. */
 static void print_usage(void)
 {
-    if (g_english) {
-        printf("NCFTP386 - Norton Commander style FTP client for DOS\n\n");
-        printf("Usage: NCFTP [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/N]\n");
-        printf("       ('-' may be used instead of '/'; flags are case-insensitive)\n\n");
-        printf("  /L:EN|DE  force English or German user interface\n");
-        printf("  /H:HOST   connect to HOST automatically on startup\n");
-        printf("  /P:PORT   port (default 21)\n");
-        printf("  /U:USER   user name (default anonymous)\n");
-        printf("  /W:PASS   password  (WARNING: stored in cleartext in the batch file)\n");
-        printf("  /N        do not save this connection to NCFTP.SAV\n");
-        printf("  /?        this help\n");
-    } else {
-        printf("NCFTP386 - FTP-Client im Norton-Commander-Stil f" ue "r DOS\n\n");
-        printf("Aufruf: NCFTP [/L:DE|EN] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/N]\n");
-        printf("       (statt '/' ist auch '-' erlaubt; Flags case-insensitiv)\n\n");
-        printf("  /L:DE|EN  Oberfl" ae "che auf Deutsch oder Englisch erzwingen\n");
-        printf("  /H:HOST   beim Start automatisch mit HOST verbinden\n");
-        printf("  /P:PORT   Port (Vorgabe 21)\n");
-        printf("  /U:USER   Benutzername (Vorgabe anonymous)\n");
-        printf("  /W:PASS   Passwort  (ACHTUNG: steht im Klartext in der Batchdatei)\n");
-        printf("  /N        diese Verbindung nicht in NCFTP.SAV speichern\n");
-        printf("  /?        diese Hilfe\n");
-    }
+    printf("NCFTP386 - Norton Commander style FTP client for DOS\n\n");
+    printf("Usage: NCFTP386 [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/N]\n");
+    printf("       ('-' may be used instead of '/'; flags are case-insensitive)\n\n");
+    printf("  /L:EN|DE  force English or German user interface\n");
+    printf("  /H:HOST   connect to HOST automatically on startup\n");
+    printf("  /P:PORT   port (default 21)\n");
+    printf("  /U:USER   user name (default anonymous)\n");
+    printf("  /W:PASS   password  (WARNING: stored in cleartext in the batch file)\n");
+    printf("  /N        do not save this connection to NCFTP386.SAV\n");
+    printf("  /?        this help\n");
 }
 
 /* -------------------------------------------------------------------------

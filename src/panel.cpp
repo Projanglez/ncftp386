@@ -31,28 +31,34 @@ struct ColLayout {
 
 static void columns(int inner, ColLayout *c)
 {
-    c->date_w   = 11;                               /* "MM-TT HH:MM"         */
+    c->date_w   = 14;                               /* "TT-MM-JJ HH:MM"      */
     c->date_off = inner - c->date_w;
-    c->size_w   = 10;                               /* "99.999.999" + Reserve*/
+    c->size_w   = 9;                                /* "9.999.999" / "xx.xxxk"*/
     c->size_off = c->date_off - 1 - c->size_w;
     c->name_off = 1;                                /* Sp.0 = Markierung     */
-    c->name_w   = c->size_off - 1 - c->name_off;
+    c->name_w   = c->size_off - 1 - c->name_off;   /* = 12, max 8.3-Name    */
     if (c->name_w < 1) c->name_w = 1;               /* Schutz fuer Mini-Panel*/
 }
 
-/* Zahl n mit Tausenderpunkten in buf schreiben (DE: Punkt, EN: Komma). */
+/* Zahl n mit Tausenderpunkten in buf schreiben (DE: Punkt, EN: Komma).
+ * n > 9.999.999: in Kilobyte ausgeben, z.B. "20.000k". */
 static void fmt_size(char *buf, unsigned long n)
 {
+    unsigned long val = n;
+    char suffix = '\0';
     char raw[16];
     const char *sep = L(".", ",");
     int len, i, pos;
-    sprintf(raw, "%lu", n);
+
+    if (n > 9999999UL) { val = n / 1000UL; suffix = 'k'; }
+    sprintf(raw, "%lu", val);
     len = (int)strlen(raw);
     pos = 0;
     for (i = 0; i < len; i++) {
         if (i > 0 && (len - i) % 3 == 0) buf[pos++] = sep[0];
         buf[pos++] = raw[i];
     }
+    if (suffix) buf[pos++] = suffix;
     buf[pos] = '\0';
 }
 
@@ -229,6 +235,13 @@ unsigned long Panel::marked_size() const
     return s;
 }
 
+int Panel::marked_dir_count() const
+{
+    int i, n = 0;
+    for (i = 0; i < count; i++) if (entries[i].marked && entries[i].is_dir) n++;
+    return n;
+}
+
 int Panel::has_entry(const char *name) const
 {
     int i;
@@ -271,13 +284,18 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
         place(out, c.size_off, tmp, c.size_w, 1);
     }
 
-    /* Datum+Zeit "MM-TT HH:MM" (rechts). Beim ".."-Eintrag leer lassen. */
+    /* Datum+Zeit (rechts). Beim ".."-Eintrag leer lassen.
+     * DE: "TT-MM-JJ HH:MM"  /  EN: "MM-DD-YY HH:MM"  (beide 14 Zeichen) */
     if (!e->is_parent) {
+        int year  = (int)((1980 + (int)((e->date >> 9) & 0x7F)) % 100);
         int month = (int)((e->date >> 5) & 0x0F);
         int day   = (int)(e->date & 0x1F);
         int hh    = (int)((e->time >> 11) & 0x1F);
         int mm    = (int)((e->time >> 5)  & 0x3F);
-        sprintf(tmp, "%02d-%02d %02d:%02d", month, day, hh, mm);
+        if (g_english)
+            sprintf(tmp, "%02d-%02d-%02d %02d:%02d", month, day, year, hh, mm);
+        else
+            sprintf(tmp, "%02d-%02d-%02d %02d:%02d", day, month, year, hh, mm);
         place(out, c.date_off, tmp, c.date_w, 1);
     }
 }
@@ -354,7 +372,7 @@ void Panel::draw()
         buf[inner] = '\0';
         place(buf, c.name_off, L("Name", "Name"), c.name_w, 0);
         place(buf, c.size_off, L("Gr" oe ss "e", "Size"), c.size_w, 1);
-        place(buf, c.date_off, L("Datum  Zeit", "Date  Time"), c.date_w, 1);
+        place(buf, c.date_off, L("Datum     Zeit", "Date      Time"), c.date_w, 1);
         fill_rect(top + 3, left + 1, 1, inner, ' ', ATTR_COLHDR);
         draw_text(top + 3, left + 1, buf, ATTR_COLHDR, inner);
     }
