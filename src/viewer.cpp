@@ -16,6 +16,7 @@
 #include "keymap.h"
 #include "dialog.h"
 #include "i18n.h"
+#include "umlaut.h"   /* immer als letzter Include */
 
 #define VIEW_BUF_MAX    32000u   /* max. eingelesene Bytes (schont knappen RAM) */
 #define VIEW_MAX_LINES   4000    /* max. indizierte Zeilen                     */
@@ -85,7 +86,7 @@ void view_file(const char *path, const char *title)
                     title ? title : "",
                     L("Zeile", "Line"),
                     top + 1, lastvis, nlines,
-                    truncated ? L("  [gekuerzt]", "  [truncated]") : "");
+                    truncated ? L("  [gek" ue "rzt]", "  [truncated]") : "");
             fill_rect(0, 0, 1, SCREEN_COLS, ' ', ATTR_MENUBAR);
             draw_text(0, 0, head, ATTR_MENUBAR, SCREEN_COLS);
 
