@@ -1148,6 +1148,8 @@ int main(int argc, char *argv[])
 
         case KEY_INS:  /* Markierung umschalten + Cursor nach unten (Norton-Stil) */
             g_active->toggle_mark(); draw_statusbar(); break;
+        case KEY_STAR: /* Numpad *: alle Markierungen invertieren (NC-Stil) */
+            g_active->invert_marks(); draw_statusbar(); break;
 
         case KEY_ENTER:
             if (g_active->enter_selected()) {
@@ -1176,6 +1178,7 @@ int main(int argc, char *argv[])
                 L("Tab        Panel wechseln\n"
                   "Pfeile     Auswahl bewegen\n"
                   "Einfg      Eintrag markieren (mehrere kopieren/l" oe "schen)\n"
+                  "*          Markierung invertieren\n"
                   "Enter      Verzeichnis betreten / Datei anzeigen\n"
                   "Backspace  " Ue "bergeordnetes Verzeichnis\n"
                   "F2 Verbinden  F3 Anzeigen  F4 Bearbeiten\n"
@@ -1184,6 +1187,7 @@ int main(int argc, char *argv[])
                   "Tab        Switch panel\n"
                   "Arrows     Move selection\n"
                   "Insert     Mark item (copy/delete several)\n"
+                  "*          Invert selection\n"
                   "Enter      Enter directory / view file\n"
                   "Backspace  Parent directory\n"
                   "F2 Connect  F3 View  F4 Edit\n"

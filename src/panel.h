@@ -88,6 +88,7 @@ public:
     /* Markierung des aktuellen Eintrags umschalten und Cursor nach unten.
      * Der ".."-Eintrag laesst sich nicht markieren. */
     void          toggle_mark();
+    void          invert_marks(); /* Numpad *: alle Markierungen invertieren       */
     void          clear_marks();
     int           marked_count()     const; /* Anzahl markierter Eintraege      */
     unsigned long marked_size()      const; /* Summe der Groessen (nur Dateien) */
