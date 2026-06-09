@@ -1,7 +1,7 @@
 # NCFTP386
 
-A Norton Commander-style **dual-panel FTP client for MS-DOS** running on real
-386 hardware. The left panel shows the local DOS filesystem; the right panel
+A Norton Commander-style **dual-panel FTP client for MS-DOS** running on any
+x86 machine. The left panel shows the local DOS filesystem; the right panel
 connects to an FTP server via the
 [mTCP](https://github.com/retrohun/mTCP) TCP/IP stack — fully
 keyboard-driven in 80×25 text mode.
@@ -12,17 +12,14 @@ keyboard-driven in 80×25 text mode.
 ## Features
 
 - Two panels: local (DOS) and remote (FTP, passive mode)
+- Copy in both directions (F5), including **recursive directory trees**
+- Multiple selection with the **Ins key** (Norton style) for copy/delete
+- Create (F7), rename (F6), **recursive delete** with pre-count confirmation (F8)
 - Navigate directories; view files with F3 (or Enter) — up to 32 KB displayed
 - Remote view (F3) downloads to a temporary file first, then opens the viewer
 - Edit local text files with F4 — minimal full-screen editor (~32 KB, local only)
-- Copy in both directions (F5), including **recursive directory trees**
-- Multiple selection with the **Ins key** (Norton style) for copy/delete
-- Per-file overwrite prompts (Overwrite / Skip / All / Cancel)
-- Create (F7), rename (F6), **recursive delete** with pre-count confirmation (F8)
-- Local drive switcher (F9), lists only present drives
-- Keepalive: sends NOOP every 60 s to prevent server idle timeouts
-- Bilingual German/English UI (auto-detected from DOS country setting,
-  or forced on the command line: `NCFTP386 /L:EN`)
+- FTP connection keepalive: sends NOOP every 60 s to prevent server idle timeouts
+- Bilingual German/English UI (auto-detected from DOS country setting, or forced on the command line: `NCFTP386 /L:EN`)
 
 ## Build requirements
 
@@ -53,10 +50,9 @@ uses `-0` (compatible with 8086/286/386+). Details are in `MAKEFILE` and `CLAUDE
 
 ## Running (on the DOS machine)
 
-A packet driver for your network card and an mTCP configuration file are required:
+A packet driver for your network card and an valid mTCP configuration file are required, as well as a valid IP-adress (static or dynamic) via mTCP.
 
 ```bat
-SET MTCPCFG=C:\NET\MTCP.CFG
 NCFTP386.EXE
 ```
 
