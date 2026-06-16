@@ -1,17 +1,18 @@
 /* =============================================================================
- * editor.h - Minimaler Vollbild-Texteditor (F4), nur lokale Dateien
+ * editor.h - Minimal full-screen text editor (F4), local files only
  * -----------------------------------------------------------------------------
- * Laedt eine Textdatei (bis ca. 32 KB) in einen Zeilenpuffer im FAR-Heap und
- * erlaubt einfaches Editieren: Zeichen einfuegen/loeschen, Zeilen teilen/
- * verbinden, scrollen. Speichern mit F2, Beenden mit Esc (Rueckfrage bei
- * Aenderungen). Bewusst minimal: kein Undo, keine Suche, kein Remote-Edit.
+ * Loads a text file (up to ~32 KB) into a line buffer on the far heap and
+ * allows simple editing: inserting/deleting characters, splitting/joining
+ * lines, scrolling. Save with F2, quit with Esc (confirms if there are
+ * unsaved changes). Deliberately minimal: no undo, no search, no remote
+ * editing.
  * ===========================================================================*/
 #ifndef EDITOR_H
 #define EDITOR_H
 
-/* path  = vollstaendiger Pfad der (lokalen) Datei.
- * title = Anzeigename in der Kopfzeile (z.B. der reine Dateiname).
- * Rueckgabe: 1 = es wurde (mindestens einmal) gespeichert, sonst 0. */
+/* path  = full path of the (local) file.
+ * title = display name in the header line (e.g. just the file name).
+ * Returns: 1 = saved at least once, otherwise 0. */
 int edit_file(const char *path, const char *title);
 
 #endif /* EDITOR_H */

@@ -1,15 +1,15 @@
 /* =============================================================================
- * panel.cpp - Abstrakte Panel-Basisklasse: Navigation & Rendering
+ * panel.cpp - Abstract panel base class: navigation & rendering
  * -----------------------------------------------------------------------------
- * Spaltenlayout im 38 Zeichen breiten Innenbereich (40-Spalten-Panel):
+ * Column layout in the 38-character-wide inner area (40-column panel):
  *
- *   Sp.0          : Markierungsspalte (reserviert)
- *   Name          : links, abgeschnitten
- *   Groesse/<DIR> : rechtsbuendig
- *   Datum MM-TT-JJ: rechtsbuendig am rechten Rand
+ *   Col.0          : mark column (reserved)
+ *   Name           : left-aligned, truncated
+ *   Size/<DIR>     : right-aligned
+ *   Date MM-DD-YY  : right-aligned at the right edge
  *
- * Spaltenbreiten werden aus der tatsaechlichen Innenbreite berechnet, damit
- * das Layout auch bei abweichender Panelbreite stimmt.
+ * Column widths are computed from the actual inner width, so the layout
+ * stays correct even with a different panel width.
  * ===========================================================================*/
 #include <string.h>
 #include <stdio.h>
@@ -18,10 +18,10 @@
 #include "panel.h"
 #include "tui.h"
 #include "i18n.h"
-#include "umlaut.h"   /* immer als letzter Include */
+#include "umlaut.h"   /* always include last */
 
 /* -------------------------------------------------------------------------
- * Spaltenlayout
+ * Column layout
  * ---------------------------------------------------------------------- */
 struct ColLayout {
     int name_off, name_w;
@@ -31,23 +31,23 @@ struct ColLayout {
 
 static void columns(int inner, ColLayout *c)
 {
-    c->date_w   = 14;                               /* "TT-MM-JJ HH:MM"      */
+    c->date_w   = 14;                               /* "DD-MM-YY HH:MM"       */
     c->date_off = inner - c->date_w;
-    c->size_w   = 9;                                /* "9.999.999" / "xx.xxxk"*/
+    c->size_w   = 9;                                /* "9,999,999" / "xx.xxxk"*/
     c->size_off = c->date_off - 1 - c->size_w;
-    c->name_off = 1;                                /* Sp.0 = Markierung     */
-    c->name_w   = c->size_off - 1 - c->name_off;   /* = 12, max 8.3-Name    */
-    if (c->name_w < 1) c->name_w = 1;               /* Schutz fuer Mini-Panel*/
+    c->name_off = 1;                                /* col.0 = mark column    */
+    c->name_w   = c->size_off - 1 - c->name_off;   /* = 12, max 8.3 name     */
+    if (c->name_w < 1) c->name_w = 1;               /* guard for mini panels  */
 }
 
-/* Zahl n mit Tausenderpunkten in buf schreiben (DE: Punkt, EN: Komma).
- * n > 9.999.999: in Kilobyte ausgeben, z.B. "20.000k". */
+/* Write number n into buf with thousands separators (EN: comma, DE: dot).
+ * n > 9,999,999: output in kilobytes, e.g. "20,000k". */
 static void fmt_size(char *buf, unsigned long n)
 {
     unsigned long val = n;
     char suffix = '\0';
     char raw[16];
-    const char *sep = L(".", ",");
+    const char *sep = L(",", ".");
     int len, i, pos;
 
     if (n > 9999999UL) { val = n / 1000UL; suffix = 'k'; }
@@ -62,15 +62,15 @@ static void fmt_size(char *buf, unsigned long n)
     buf[pos] = '\0';
 }
 
-/* Text in 'out' an Offset 'off' platzieren, links- oder rechtsbuendig in der
- * Breite 'w'. Schreibt KEINE NUL (Felder liegen direkt aneinander). */
+/* Place text in 'out' at offset 'off', left- or right-aligned within width
+ * 'w'. Writes NO NUL terminator (fields sit directly next to each other). */
 static void place(char *out, int off, const char *s, int w, int rightalign)
 {
     int len = 0;
     int start, i;
 
     while (s[len] != '\0') len++;
-    if (len > w) len = w;                           /* abschneiden           */
+    if (len > w) len = w;                           /* truncate              */
 
     start = rightalign ? (off + (w - len)) : off;
     for (i = 0; i < len; i++)
@@ -78,7 +78,7 @@ static void place(char *out, int off, const char *s, int w, int rightalign)
 }
 
 /* -------------------------------------------------------------------------
- * Konstruktor / Destruktor / Geometrie
+ * Constructor / destructor / geometry
  * ---------------------------------------------------------------------- */
 Panel::Panel()
 {
@@ -101,7 +101,7 @@ unsigned char Panel::frame_attr() const
     return ATTR_BORDER;
 }
 
-/* Default-Aktionen: wirkungslos. Unterklassen ueberschreiben. */
+/* Default actions: no-op. Subclasses override. */
 int  Panel::enter_selected() { return 0; }
 void Panel::go_parent()      { }
 
@@ -110,7 +110,7 @@ void Panel::go_parent()      { }
  * ---------------------------------------------------------------------- */
 int Panel::visible_rows() const
 {
-    /* Aufbau: oben Rahmen + Pfad + Trenner + Spaltenkopf, unten Rahmen. */
+    /* Layout: border + path + separator on top, border at the bottom. */
     return (height > 5) ? (height - 5) : 0;
 }
 
@@ -130,8 +130,8 @@ void Panel::clamp_scroll()
     if (topentry < 0)                 topentry = 0;   /* count < vr */
 }
 
-/* Flimmerfreie Cursor-Bewegung: nur die zwei betroffenen Zeilen neu zeichnen,
- * sofern nicht gescrollt wurde (dann ist ein Vollaufbau noetig). */
+/* Flicker-free cursor movement: only redraw the two affected rows, unless
+ * scrolling occurred (in which case a full rebuild is needed). */
 void Panel::move_step(int delta)
 {
     int old_cursor = cursor;
@@ -140,11 +140,11 @@ void Panel::move_step(int delta)
     cursor += delta;
     clamp_scroll();
 
-    if (topentry != old_top) {        /* am Rand gescrollt -> alles neu */
+    if (topentry != old_top) {        /* scrolled at the edge -> redraw everything */
         draw();
         return;
     }
-    if (cursor != old_cursor) {       /* nur alte + neue Cursorzeile */
+    if (cursor != old_cursor) {       /* only the old + new cursor row */
         draw_entry_row(old_cursor);
         draw_entry_row(cursor);
     }
@@ -178,7 +178,7 @@ void Panel::select_by_name(const char *name)
             }
         }
     }
-    clamp_scroll();              /* nicht gefunden -> Cursor gueltig halten */
+    clamp_scroll();              /* not found -> keep the cursor valid */
 }
 
 void Panel::set_cursor_index(int idx)
@@ -187,7 +187,7 @@ void Panel::set_cursor_index(int idx)
     clamp_scroll();
 }
 
-/* --- Mehrfachauswahl ---------------------------------------------------- */
+/* --- Multi-selection ----------------------------------------------------- */
 void Panel::toggle_mark()
 {
     int marked_idx = cursor;
@@ -197,14 +197,14 @@ void Panel::toggle_mark()
     if (e && !e->is_parent)
         e->marked = (unsigned char)(e->marked ? 0 : 1);
 
-    cursor++;                    /* wie Norton Commander: weiter nach unten */
+    cursor++;                    /* like Norton Commander: move on down */
     clamp_scroll();
 
-    if (topentry != old_top) {   /* gescrollt -> alles neu */
+    if (topentry != old_top) {   /* scrolled -> redraw everything */
         draw();
         return;
     }
-    /* markierte (alte) Zeile + ggf. neue Cursorzeile flimmerfrei neu malen */
+    /* flicker-free redraw of the (old) marked row + the new cursor row, if any */
     draw_entry_row(marked_idx);
     if (cursor != marked_idx)
         draw_entry_row(cursor);
@@ -283,7 +283,7 @@ void Panel::compare_mark(const Panel *other)
 }
 
 /* -------------------------------------------------------------------------
- * Eintrag formatieren
+ * Format an entry
  * ---------------------------------------------------------------------- */
 void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
 {
@@ -297,7 +297,7 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
     for (i = 0; i < inner; i++) out[i] = ' ';
     out[inner] = '\0';
 
-    /* Name: Verzeichnisse GROSSBUCHSTABEN, Dateien kleinbuchstaben. */
+    /* Name: directories UPPERCASE, files lowercase. */
     for (i = 0; e->name[i] && i < PANEL_NAME_MAX - 1; i++)
         dispname[i] = (char)(e->is_dir
                              ? toupper((unsigned char)e->name[i])
@@ -305,7 +305,7 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
     dispname[i] = '\0';
     place(out, c.name_off, dispname, c.name_w, 0);
 
-    /* Groesse oder <DIR> (rechts). */
+    /* Size or <DIR> (right-aligned). */
     if (e->is_dir) {
         place(out, c.size_off, "<DIR>", c.size_w, 1);
     } else {
@@ -313,8 +313,8 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
         place(out, c.size_off, tmp, c.size_w, 1);
     }
 
-    /* Datum+Zeit (rechts). Beim ".."-Eintrag leer lassen.
-     * DE: "TT-MM-JJ HH:MM"  /  EN: "MM-DD-YY HH:MM"  (beide 14 Zeichen) */
+    /* Date+time (right-aligned). Left empty for the ".." entry.
+     * EN: "MM-DD-YY HH:MM"  /  DE: "DD-MM-YY HH:MM"  (both 14 characters) */
     if (!e->is_parent) {
         int year  = (int)((1980 + (int)((e->date >> 9) & 0x7F)) % 100);
         int month = (int)((e->date >> 5) & 0x0F);
@@ -330,13 +330,13 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
 }
 
 /* -------------------------------------------------------------------------
- * Zeichnen
+ * Drawing
  * ---------------------------------------------------------------------- */
 
-/* Eine einzelne Eintragszeile (entry-Index idx) neu zeichnen. Liegt idx
- * ausserhalb des sichtbaren Fensters, passiert nichts. Leere Zeilen (idx jen-
- * seits der Liste) werden in Panelfarbe geleert. Basis fuer den flimmerfreien
- * Cursor-Redraw und fuer den Voll-draw(). */
+/* Redraw a single entry row (entry index idx). If idx is outside the
+ * visible window, nothing happens. Empty rows (idx beyond the list) are
+ * cleared in panel color. Basis for the flicker-free cursor redraw and for
+ * the full draw(). */
 void Panel::draw_entry_row(int idx)
 {
     int  inner = width - 2;
@@ -346,7 +346,7 @@ void Panel::draw_entry_row(int idx)
     char buf[PANEL_HEADER_MAX];
 
     if (inner < 1) return;
-    if (rel < 0 || rel >= vr) return;        /* nicht sichtbar */
+    if (rel < 0 || rel >= vr) return;        /* not visible */
     row = top + 4 + rel;
 
     if (idx >= 0 && idx < count) {
@@ -367,21 +367,21 @@ void Panel::draw()
 {
     int inner = width - 2;
     unsigned char fa = frame_attr();
-    unsigned char ha = ATTR_PANEL;   /* Pfad-Header: immer weiss auf blau */
+    unsigned char ha = ATTR_PANEL;   /* path header: always white on blue */
     int vr = visible_rows();
     int i;
     char buf[PANEL_HEADER_MAX];
 
     if (inner < 1) return;
 
-    /* 1) Gesamte Panelflaeche in Panelfarbe loeschen. */
+    /* 1) Clear the whole panel area in panel color. */
     fill_rect(top, left, height, width, ' ', ATTR_PANEL);
 
-    /* 2) Doppelrahmen + Trennlinie unter dem Pfad-Header. */
+    /* 2) Double border + divider below the path header. */
     draw_box(top, left, height, width, fa, 1);
     draw_hsep(top + 2, left, width, fa, 1);
 
-    /* 3) Pfad-Header (Zeile top+1), zentriert. Bei Ueberlaenge das Ende zeigen. */
+    /* 3) Path header (row top+1), centered. If too long, show the end. */
     {
         const char far *h = header;
         const char far *p = h;
@@ -393,20 +393,20 @@ void Panel::draw()
         draw_text(top + 1, left + 1 + pad, p, ha, len);
     }
 
-    /* 4) Spaltenkopf (Zeile top+3). */
+    /* 4) Column header (row top+3). */
     {
         ColLayout c;
         columns(inner, &c);
         for (i = 0; i < inner; i++) buf[i] = ' ';
         buf[inner] = '\0';
         place(buf, c.name_off, L("Name", "Name"), c.name_w, 0);
-        place(buf, c.size_off, L("Gr" oe ss "e", "Size"), c.size_w, 1);
-        place(buf, c.date_off, L("Datum     Zeit", "Date      Time"), c.date_w, 1);
+        place(buf, c.size_off, L("Size", "Gr" oe ss "e"), c.size_w, 1);
+        place(buf, c.date_off, L("Date      Time", "Datum     Zeit"), c.date_w, 1);
         fill_rect(top + 3, left + 1, 1, inner, ' ', ATTR_COLHDR);
         draw_text(top + 3, left + 1, buf, ATTR_COLHDR, inner);
     }
 
-    /* 5) Eintraege (Zeilen top+4 .. top+height-2). */
+    /* 5) Entries (rows top+4 .. top+height-2). */
     for (i = 0; i < vr; i++)
         draw_entry_row(topentry + i);
 }

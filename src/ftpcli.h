@@ -1,32 +1,31 @@
 /*
    NCFTP386 - ftpcli.h
-   FTP-Protokoll-Statemachine ueber mTCP (PASV-Modus).
+   FTP protocol state machine over mTCP (always PASV mode).
 
-   Bewusst OHNE mTCP-Header: die TcpSocket-Zeiger sind als `void*`
-   gekapselt. Dadurch koennen ncftp.cpp / rpanel.cpp diese Klasse nutzen,
-   ohne CFG_H und die mTCP-Includes zu benoetigen. Nur ftpcli.cpp zieht
-   die mTCP-Header herein.
+   Deliberately WITHOUT mTCP headers: the TcpSocket pointers are wrapped as
+   `void*`. This lets ncftp.cpp / rpanel.cpp use this class without needing
+   CFG_H and the mTCP includes. Only ftpcli.cpp pulls in the mTCP headers.
 */
 
 #ifndef FTPCLI_H
 #define FTPCLI_H
 
 
-/* --- Rueckgabe-Codes -------------------------------------------------- */
+/* --- Return codes ------------------------------------------------------ */
 #define FTP_OK             0
 #define FTP_ERR_GENERAL   -1
-#define FTP_ERR_DNS       -2   /* Hostname nicht aufloesbar              */
-#define FTP_ERR_CONNECT   -3   /* TCP-Connect fehlgeschlagen             */
-#define FTP_ERR_TIMEOUT   -4   /* Zeitueberschreitung                    */
-#define FTP_ERR_AUTH      -5   /* Login abgelehnt                        */
-#define FTP_ERR_PROTO     -6   /* Protokollfehler / Verbindung verloren  */
-#define FTP_ERR_DATACONN  -7   /* Datenverbindung fehlgeschlagen         */
-#define FTP_ERR_LOCALIO   -8   /* Lokaler Datei-Fehler                   */
-#define FTP_ERR_SERVER    -9   /* Server antwortete mit 4xx/5xx          */
-#define FTP_ERR_ABORT    -10   /* Benutzer hat den Vorgang abgebrochen   */
+#define FTP_ERR_DNS       -2   /* Host name could not be resolved        */
+#define FTP_ERR_CONNECT   -3   /* TCP connect failed                     */
+#define FTP_ERR_TIMEOUT   -4   /* Timed out                              */
+#define FTP_ERR_AUTH      -5   /* Login rejected                         */
+#define FTP_ERR_PROTO     -6   /* Protocol error / connection lost       */
+#define FTP_ERR_DATACONN  -7   /* Data connection failed                 */
+#define FTP_ERR_LOCALIO   -8   /* Local file error                       */
+#define FTP_ERR_SERVER    -9   /* Server replied with 4xx/5xx            */
+#define FTP_ERR_ABORT    -10   /* User aborted the operation             */
 
 
-/* --- Zustaende (vgl. CLAUDE.md) --------------------------------------- */
+/* --- States (see CLAUDE.md) --------------------------------------- */
 enum FtpState {
     FTP_DISCONNECTED = 0,
     FTP_CONNECTING,
@@ -41,10 +40,10 @@ enum FtpState {
 };
 
 
-/* Callback: einmal pro Roh-Textzeile einer LIST-Ausgabe (ohne CRLF). */
+/* Callback: called once per raw text line of a LIST output (without CRLF). */
 typedef void (*FtpLineCb)(void *ctx, const char *line);
 
-/* Callback: Fortschritt waehrend Transfers. total==0 => unbekannt. */
+/* Callback: progress during transfers. total==0 => unknown. */
 typedef void (*FtpProgressCb)(void *ctx, unsigned long sofar, unsigned long total);
 
 
@@ -57,18 +56,18 @@ class FtpClient {
 public:
     FtpClient();
 
-    /* Einmalige mTCP-Stack-Initialisierung (parseEnv + initStack).
-       MUSS vor dem ersten connect() aufgerufen werden, genau einmal.
-       Gibt FTP_OK oder einen Fehlercode zurueck. */
+    /* One-time mTCP stack initialization (parseEnv + initStack).
+       MUST be called once before the first connect().
+       Returns FTP_OK or an error code. */
     static int  init_stack(void);
     static void shutdown_stack(void);
 
-    /* Den mTCP-Stack 'ms' Millisekunden lang treiben, ohne etwas zu senden.
-     * Zum "Warmlaufen" direkt nach init_stack (Treiber/Link setteln lassen),
-     * bevor die allererste Verbindung aufgebaut wird. */
+    /* Drive the mTCP stack for 'ms' milliseconds without sending anything.
+     * Used to "warm up" right after init_stack (let the driver/link settle)
+     * before the very first connection is established. */
     static void stack_poll(unsigned ms);
 
-    /* Steuerverbindung aufbauen + einloggen (USER/PASS). */
+    /* Establish the control connection + log in (USER/PASS). */
     int  connect(const char *host, unsigned port,
                  const char *user, const char *pass);
     void disconnect(void);
@@ -78,35 +77,34 @@ public:
     }
     FtpState get_state(void) const { return state; }
 
-    /* --- Keepalive / Leerlauf --- */
-    /* NOOP senden (haelt die Steuerverbindung gegen Server-Idle-Timeouts wach).
-     * Geht die Verbindung dabei verloren, wird sauber getrennt; Rueckgabe
-     * FTP_OK oder ein Fehlercode. */
+    /* --- Keepalive / idle --- */
+    /* Send NOOP (keeps the control connection alive against server idle
+     * timeouts). If the connection is lost in the process, disconnects
+     * cleanly; returns FTP_OK or an error code. */
     int  noop(void);
-    /* Den Stack einmal treiben und einen serverseitigen Verbindungsabbau
-     * erkennen (ohne etwas zu senden). Rueckgabe 1 = noch verbunden, 0 = gerade
-     * getrennt. */
+    /* Drive the stack once and detect a server-side disconnect (without
+     * sending anything). Returns 1 = still connected, 0 = just disconnected. */
     int  idle_drive(void);
 
-    /* Verzeichnisliste abrufen. Jede Roh-Textzeile -> cb(ctx, line). */
+    /* Fetch a directory listing. Every raw text line -> cb(ctx, line). */
     int  list(const char *path, FtpLineCb cb, void *ctx);
 
-    /* Navigation auf dem Server. */
+    /* Navigation on the server. */
     int  change_dir(const char *path);          /* CWD          */
     int  parent_dir(void);                       /* CDUP         */
-    int  get_cwd(char *buf, int buflen);         /* PWD -> Pfad  */
+    int  get_cwd(char *buf, int buflen);         /* PWD -> path  */
 
-    /* Transfers (immer Binaer/TYPE I). */
+    /* Transfers (always binary/TYPE I). */
     int  retr(const char *remote, const char *localpath,
               FtpProgressCb cb, void *ctx);
     int  stor(const char *localpath, const char *remote,
               FtpProgressCb cb, void *ctx);
 
-    /* 1, falls auf dem Server eine Datei mit diesem Pfad existiert (per SIZE).
-     * Fuer die Ueberschreiben-Abfrage beim rekursiven Upload. */
+    /* 1 if a file with this path exists on the server (via SIZE).
+     * Used for the overwrite prompt during recursive upload. */
     int  remote_file_exists(const char *path);
 
-    /* Dateioperationen auf dem Server. */
+    /* File operations on the server. */
     int  make_dir(const char *path);             /* MKD          */
     int  remove_dir(const char *path);           /* RMD          */
     int  remove_file(const char *path);          /* DELE         */
@@ -118,25 +116,25 @@ public:
 
 private:
     FtpState state;
-    void    *ctrl;                  /* TcpSocket* (opak)              */
+    void    *ctrl;                  /* TcpSocket* (opaque)            */
     char     hostname[FTP_HOST_MAX];
-    int      lastCode;              /* letzter 3-stelliger Reply-Code */
-    char     replyText[FTP_LINE_MAX]; /* Text der letzten Reply-Zeile */
+    int      lastCode;              /* last 3-digit reply code        */
+    char     replyText[FTP_LINE_MAX]; /* text of the last reply line  */
     char     errmsg[FTP_ERRMSG_MAX];
 
-    unsigned char pasvAddr[4];      /* aus 227-Antwort geparst        */
+    unsigned char pasvAddr[4];      /* parsed from the 227 reply      */
     unsigned      pasvPort;
 
-    /* --- interne Helfer (in ftpcli.cpp) --- */
-    int  sendCmd(const char *cmd);                  /* haengt CRLF an   */
+    /* --- internal helpers (in ftpcli.cpp) --- */
+    int  sendCmd(const char *cmd);                  /* appends CRLF     */
     int  sendCmdArg(const char *cmd, const char *arg);
-    int  sendRaw(const char *buf, int len);         /* alles senden     */
-    /* Code oder <0. drainCtx (nur RETR-"150") = DrainCtx*: waehrend des
-     * Wartens die Datenverbindung leeren (kein mTCP-Header noetig -> void*). */
+    int  sendRaw(const char *buf, int len);         /* sends everything */
+    /* Code or <0. drainCtx (RETR "150" only) = DrainCtx*: drain the data
+     * connection while waiting (no mTCP header needed -> void*). */
     int  readReply(void *drainCtx = 0);
     int  openDataConn(void **dataSockOut);          /* PASV + connect   */
     void closeData(void *dataSock);
-    int  simpleCmd(const char *cmd, const char *arg); /* senden + Reply */
+    int  simpleCmd(const char *cmd, const char *arg); /* send + reply  */
     void setError(const char *msg);
     void setErrorReply(const char *prefix);
 };

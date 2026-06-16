@@ -1,16 +1,17 @@
 /* =============================================================================
- * umlaut.h - Deutsche Umlaute als CP437/850-Bytes fuer String-Literale
+ * umlaut.h - German umlauts as CP437/850 bytes for string literals
  * -----------------------------------------------------------------------------
- * Die Edit/Build-Werkzeuge speichern Quelltext als UTF-8; ein direkt getipptes
- * "ue" -> "ü" wuerde dort als 2 Bytes (0xC3 0xBC) landen und auf dem DOS-Schirm
- * Müll ergeben. Daher die Umlaute als Einzel-Byte-Escapes ueber Makros, die in
- * String-Literale einkonkateniert werden:  "L" oe "schen"  ->  "Löschen".
+ * The edit/build tools store source code as UTF-8; a directly typed
+ * "ue" -> "ü" would end up there as 2 bytes (0xC3 0xBC) and produce
+ * garbage on the DOS screen. So the umlauts are single-byte escapes via
+ * macros that are concatenated into string literals:  "L" oe "schen"  ->
+ * "Löschen".
  *
- * Die Bytewerte sind in CP437 UND CP850 identisch (deutscher DOS-Standard):
+ * The byte values are identical in CP437 AND CP850 (German DOS standard):
  *   ä=0x84  ö=0x94  ü=0x81  Ä=0x8E  Ö=0x99  Ü=0x9A  ß=0xE1
  *
- * WICHTIG: Diesen Header IMMER als LETZTEN Include einbinden, damit die kurzen
- * Makronamen keine System- oder mTCP-Header beeinflussen.
+ * IMPORTANT: Always include this header LAST so that the short macro
+ * names don't affect system or mTCP headers.
  * ===========================================================================*/
 #ifndef UMLAUT_H
 #define UMLAUT_H

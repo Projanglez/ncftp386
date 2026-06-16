@@ -1,18 +1,18 @@
 /* =============================================================================
- * ncftp.cpp - NCFTP386: Main, Bildschirmaufbau und Event-Loop
+ * ncftp.cpp - NCFTP386: Main, screen layout and event loop
  * -----------------------------------------------------------------------------
- * Norton-Commander-artiger Dual-Panel-Dateimanager: links lokales DOS-Datei-
- * system, rechts FTP-remote ueber mTCP. Die Hauptschleife arbeitet polymorph
- * ueber Panel*.
+ * Norton-Commander-style dual-panel file manager: local DOS filesystem on the
+ * left, FTP remote via mTCP on the right. The main loop works polymorphically
+ * over Panel*.
  *
- * Bildschirm (80x25) - ohne Menue-/Kommandozeile, maximaler Panelinhalt:
- *   Zeilen 0-22 : zwei Panels (je 40 Spalten breit)
- *   Zeile  23   : Statusleiste (Dateiinfo + Verbindungsstatus)
- *   Zeile  24   : Funktionstastenleiste
+ * Screen (80x25) - no menu/command line, maximum panel content:
+ *   Rows 0-22 : two panels (each 40 columns wide)
+ *   Row  23   : status bar (file info + connection status)
+ *   Row  24   : function key bar
  *
- * Sprache (Deutsch/Englisch) wird beim Start aus der DOS-Laendereinstellung
- * abgeleitet; alle sichtbaren Texte laufen ueber L("de","en").
- * Kommandozeile: NCFTP EN  (oder /EN, -EN) -> erzwingt Englisch.
+ * Language (German/English) is derived at startup from the DOS country
+ * setting; all visible text goes through L("en","de").
+ * Command line: NCFTP EN  (or /EN, -EN) -> forces English.
  * ===========================================================================*/
 #include <string.h>
 #include <stdio.h>
@@ -34,58 +34,58 @@
 #include "dircopy.h"
 #include "connsave.h"
 #include "i18n.h"
-#include "umlaut.h"   /* immer als letzter Include */
+#include "umlaut.h"   /* always include last */
 
 #define APP_VERSION "0.9.1"
 
-/* ---- Bildschirm-Layout ---- */
+/* ---- Screen layout ---- */
 #define PANEL_TOP     0
-#define PANEL_ROWS    23           /* Zeilen 0..22                     */
+#define PANEL_ROWS    23           /* rows 0..22                       */
 #define PANEL_COLS    40
 #define ROW_STATUS    23
 #define ROW_FKEYS     24
 
-/* ---- Globale Panels ---- */
-/* Grosse Objekte (~25 KB je Panel): beim Kompilieren von ncftp.cpp -zt256
- * setzen, damit Open Watcom sie in FAR-Datensegmente legt (DGROUP < 64 KB).
- * Links lokal, rechts FTP-remote. Die Hauptschleife arbeitet polymorph
- * ueber Panel*. */
+/* ---- Global panels ---- */
+/* Large objects (~25 KB per panel): when compiling ncftp.cpp, set -zt256
+ * so Open Watcom places them in FAR data segments (DGROUP < 64 KB).
+ * Left is local, right is FTP remote. The main loop works polymorphically
+ * over Panel*. */
 static LocalPanel  g_left;
 static RemotePanel g_right;
 static Panel      *g_active = 0;
 
-/* FTP-Client (Steuerung der Remote-Seite). g_ftp_ready=1, sobald der
- * mTCP-Stack erfolgreich initialisiert wurde. */
+/* FTP client (controls the remote side). g_ftp_ready=1 once the mTCP
+ * stack has been successfully initialized. */
 static FtpClient g_ftp;
 static int       g_ftp_ready = 0;
 
-/* Verbindungsdaten der zuletzt genutzten/gemerkten Verbindung. Auf Datei-Ebene,
- * damit main() (Laden aus NCFTP.SAV, Kommandozeile) und do_connect() (Dialog,
- * Speichern) gemeinsam darauf zugreifen. */
+/* Data for the most recently used/remembered connection. Kept at file scope
+ * so main() (loading from NCFTP.SAV, command line) and do_connect() (dialog,
+ * saving) can both access it. */
 static char g_host[FTP_HOST_MAX] = "";
 static char g_portStr[8]         = "21";
 static char g_user[40]           = "anonymous";
 static char g_pass[40]           = "";
-static int  g_savepw      = 1;   /* Passwort mitmerken (0 = nur Host/User)     */
-static int  g_saveconn    = 1;   /* 0 = diese Sitzung nicht in NCFTP.SAV       */
-static int  g_autoconnect = 0;   /* per Kommandozeile (-h) automatisch verbinden*/
-static int  g_nosplash    = 0;   /* /Q: Splash-Screen ueberspringen             */
+static int  g_savepw      = 1;   /* remember password (0 = host/user only)     */
+static int  g_saveconn    = 1;   /* 0 = do not save this session in NCFTP.SAV  */
+static int  g_autoconnect = 0;   /* auto-connect via command line (-h)         */
+static int  g_nosplash    = 0;   /* /Q: skip splash screen                     */
 
-/* Kritischer-Fehler-Handler (INT 24h): verhindert die DOS-Abfrage
- * "Abort, Retry, Fail?" - z.B. bei einem leeren Diskettenlaufwerk. Statt den
- * Bildschirm zu zerstoeren, lassen wir die fehlgeschlagene DOS-Operation
- * einfach mit Fehler zurueckkehren ("Fail"). Wird einmal in main() registriert. */
+/* Critical-error handler (INT 24h): prevents the DOS "Abort, Retry, Fail?"
+ * prompt - e.g. for an empty floppy drive. Instead of letting it wreck the
+ * screen, we simply let the failed DOS operation return with an error
+ * ("Fail"). Registered once in main(). */
 static int ncftp_harderr(unsigned deverr, unsigned errcode, unsigned *devhdr)
 {
     (void)deverr; (void)errcode; (void)devhdr;
-    return _HARDERR_FAIL;           /* fehlgeschlagene DOS-Operation: einfach scheitern */
+    return _HARDERR_FAIL;           /* failed DOS operation: just fail */
 }
 
 /* -------------------------------------------------------------------------
- * Bildschirm-Chrome
+ * Screen chrome
  * ---------------------------------------------------------------------- */
 
-/* Funktionstasten-Beschriftung je Sprache. F7 = "MkDir" (in beiden gleich). */
+/* Function key labels per language. F7 = "MkDir" (same in both). */
 static const char *fkey_label(int i)
 {
     static const char *de[10] = {
@@ -104,7 +104,7 @@ static void draw_fkeybar(void)
     int i;
     fill_rect(ROW_FKEYS, 0, 1, SCREEN_COLS, ' ', ATTR_FNKEY_LBL);
     for (i = 0; i < 10; i++) {
-        int col = i * 8;            /* 10 Zellen a 8 Spalten = 80 */
+        int col = i * 8;            /* 10 cells of 8 columns = 80 */
         char num[4];
         int nlen;
         sprintf(num, "%d", i + 1);  /* 1..10 */
@@ -114,7 +114,7 @@ static void draw_fkeybar(void)
     }
 }
 
-/* "1234567" -> "1.234.567" (de) bzw. "1,234,567" (en). out >= 20 Zeichen. */
+/* "1234567" -> "1,234,567" (en) or "1.234.567" (de). out >= 20 characters. */
 static void format_thousands(unsigned long v, char *out)
 {
     char tmp[16];
@@ -128,7 +128,7 @@ static void format_thousands(unsigned long v, char *out)
     out[o] = '\0';
 }
 
-/* Bytes -> "(123 KB)" bzw. "(1,2 MB)". MB ab > 1000 KB. out >= 24 Zeichen. */
+/* Bytes -> "(123 KB)" or "(1.2 MB)". MB once > 1000 KB. out >= 24 characters. */
 static void format_human(unsigned long bytes, char *out)
 {
     char dec = g_english ? '.' : ',';
@@ -151,14 +151,14 @@ static void draw_statusbar(void)
     PanelEntry *e = g_active ? g_active->selected() : 0;
 
     if (g_ftp.is_connected())
-        sprintf(conn, "%s %.20s", L("Verbunden:", "Connected:"), g_ftp.host_name());
+        sprintf(conn, "%s %.20s", L("Connected:", "Verbunden:"), g_ftp.host_name());
     else
-        strcpy(conn, L("Nicht verbunden", "Not connected"));
+        strcpy(conn, L("Not connected", "Nicht verbunden"));
     clen = (int)strlen(conn);
 
     fill_rect(ROW_STATUS, 0, 1, SCREEN_COLS, ' ', ATTR_STATUSBAR);
 
-    /* Markierungen haben Vorrang vor der Einzeldatei-Info. */
+    /* Marked entries take precedence over the single-file info. */
     if (g_active && g_active->marked_count() > 0) {
         int nm = g_active->marked_count();
         int nd = g_active->marked_dir_count();
@@ -169,28 +169,28 @@ static void draw_statusbar(void)
             if (ms >= 1024UL) {
                 format_human(ms, hum);
                 if (nd > 0)
-                    sprintf(info, L(" %d markiert   %s Bytes %s + %d Dir(s)",
-                                    " %d marked   %s bytes %s + %d Dir(s)"),
+                    sprintf(info, L(" %d marked   %s bytes %s + %d Dir(s)",
+                                    " %d markiert   %s Bytes %s + %d Dir(s)"),
                             nm, num, hum, nd);
                 else
-                    sprintf(info, L(" %d markiert   %s Bytes %s",
-                                    " %d marked   %s bytes %s"),
+                    sprintf(info, L(" %d marked   %s bytes %s",
+                                    " %d markiert   %s Bytes %s"),
                             nm, num, hum);
             } else {
                 if (nd > 0)
-                    sprintf(info, L(" %d markiert   %s Bytes + %d Dir(s)",
-                                    " %d marked   %s bytes + %d Dir(s)"),
+                    sprintf(info, L(" %d marked   %s bytes + %d Dir(s)",
+                                    " %d markiert   %s Bytes + %d Dir(s)"),
                             nm, num, nd);
                 else
-                    sprintf(info, L(" %d markiert   %s Bytes",
-                                    " %d marked   %s bytes"),
+                    sprintf(info, L(" %d marked   %s bytes",
+                                    " %d markiert   %s Bytes"),
                             nm, num);
             }
         } else {
             if (nd > 0)
-                sprintf(info, L(" %d markiert + %d Dir(s)", " %d marked + %d Dir(s)"), nm, nd);
+                sprintf(info, L(" %d marked + %d Dir(s)", " %d markiert + %d Dir(s)"), nm, nd);
             else
-                sprintf(info, L(" %d markiert", " %d marked"), nm);
+                sprintf(info, L(" %d marked", " %d markiert"), nm);
         }
         draw_text(ROW_STATUS, 0, info, ATTR_STATUSBAR, SCREEN_COLS - 2 - clen);
         draw_text(ROW_STATUS, SCREEN_COLS - clen, conn, ATTR_STATUSBAR, clen);
@@ -214,13 +214,13 @@ static void draw_statusbar(void)
             sprintf(info, " %-12s   %lu Bytes", e->name, e->size);
         }
     } else {
-        strcpy(info, L(" (leer)", " (empty)"));
+        strcpy(info, L(" (empty)", " (leer)"));
     }
     draw_text(ROW_STATUS, 0, info, ATTR_STATUSBAR, SCREEN_COLS - 2 - clen);
     draw_text(ROW_STATUS, SCREEN_COLS - clen, conn, ATTR_STATUSBAR, clen);
 }
 
-/* Kurze Meldung in der Statusleiste (bis zur naechsten Aktualisierung). */
+/* Brief message in the status bar (until the next refresh). */
 static void flash_status(const char *msg)
 {
     fill_rect(ROW_STATUS, 0, 1, SCREEN_COLS, ' ', ATTR_STATUSBAR);
@@ -234,9 +234,9 @@ static void set_active(Panel *p)
     g_right.set_active(p == (Panel *)&g_right);
 }
 
-/* Datum + Uhrzeit oben rechts (in der obersten Rahmenzeile). Endet bei Spalte
- * 77, sodass rechts 2 Rahmenzeichen (Spalten 78/79) sichtbar bleiben.
- * Format sprachabhaengig (24-h): DE TT.MM.JJJJ, EN MM/DD/YYYY. */
+/* Date + time in the top right (in the topmost border row). Ends at column
+ * 77, so 2 border characters (columns 78/79) remain visible on the right.
+ * Format depends on language (24-h): EN MM/DD/YYYY, DE DD.MM.YYYY. */
 static void draw_clock(void)
 {
     struct dosdate_t d;
@@ -254,7 +254,7 @@ static void draw_clock(void)
                 d.day, d.month, d.year, t.hour, t.minute, t.second);
 
     len = (int)strlen(buf);
-    col = 78 - len;                 /* letztes Zeichen auf Spalte 77 */
+    col = 78 - len;                 /* last character at column 77 */
     if (col < 1) col = 1;
     draw_text(0, col, buf, ATTR_BORDER, len);
 }
@@ -268,32 +268,33 @@ static void redraw_all(void)
     draw_clock();
 }
 
-/* Wird gerufen, wenn die FTP-Verbindung im Leerlauf verloren ging. */
+/* Called when the FTP connection was lost while idle. */
 static void handle_disconnect(void)
 {
-    g_right.refresh();              /* zeigt "(nicht verbunden)" */
-    redraw_all();                   /* UI vollstaendig aktuell vor dem Popup */
-    dlg_error(L("Verbindung getrennt", "Connection lost"),
-              L("Der Server hat die Verbindung beendet.",
-                "The server closed the connection."));
+    g_right.refresh();              /* shows "(not connected)" */
+    redraw_all();                   /* fully update the UI before the popup */
+    dlg_error(L("Connection lost", "Verbindung getrennt"),
+              L("The server closed the connection.",
+                "Der Server hat die Verbindung beendet."));
 }
 
 /* -------------------------------------------------------------------------
- * F2 - FTP-Verbindung herstellen / trennen
- * Verbindungsdaten stehen in g_host/g_portStr/g_user/g_pass (aus NCFTP.SAV oder
- * der Kommandozeile vorbelegt, im Dialog editierbar). Bei Erfolg werden sie -
- * sofern nicht per -n unterdrueckt - wieder gespeichert (Passwort nur, wenn
- * g_savepw gesetzt ist). Die eigentliche Verbindung ist blockierend.
+ * F2 - Establish / close the FTP connection
+ * Connection data lives in g_host/g_portStr/g_user/g_pass (pre-filled from
+ * NCFTP.SAV or the command line, editable in the dialog). On success it is
+ * saved again - unless suppressed via -n (password only if g_savepw is
+ * set). The actual connect call is blocking.
  * ---------------------------------------------------------------------- */
 
-/* Verbindung mit den aktuellen g_*-Daten aufbauen. Bei Erfolg: rechtes Panel
- * listen, Fokus dorthin, Daten speichern. Rueckgabe FTP_OK oder Fehlercode.
- * Zeichnet selbst NICHT neu (Aufrufer entscheidet ueber redraw/Fehlerdialog).
+/* Connect using the current g_* data. On success: list the right panel,
+ * move focus there, save the data. Returns FTP_OK or an error code.
+ * Does NOT redraw itself (the caller decides on redraw/error dialog).
  *
- * Transiente Fehler werden EINMAL automatisch wiederholt: Auf echter Hardware
- * geht das allererste TCP-SYN nach einem Kaltstart gelegentlich verloren (Switch-/
- * NIC-Aufwachen); mTCPs eigene SYN-Wiederholung kommt erst nach ~10s. Ein kurzer
- * Nachlauf + frisches SYN heilt das zuverlaessig - gilt fuer F2 wie Auto-Connect. */
+ * Transient errors are retried automatically ONCE: on real hardware the
+ * very first TCP SYN after a cold start is occasionally lost (switch/NIC
+ * wake-up); mTCP's own SYN retry only kicks in after ~10s. A short settle
+ * period + a fresh SYN reliably fixes this - applies to both F2 and
+ * auto-connect. */
 static int perform_connect(void)
 {
     unsigned port = (unsigned)atoi(g_portStr);
@@ -304,20 +305,20 @@ static int perform_connect(void)
 
     for (attempt = 0; attempt < 2; attempt++) {
         flash_status(attempt == 0
-            ? L(" Verbinde mit FTP-Server ...", " Connecting to FTP server ...")
-            : L(" Erneuter Verbindungsversuch ...", " Retrying connection ..."));
+            ? L(" Connecting to FTP server ...", " Verbinde mit FTP-Server ...")
+            : L(" Retrying connection ...", " Erneuter Verbindungsversuch ..."));
 
         rc = g_ftp.connect(g_host, port, g_user, g_pass);
         if (rc == FTP_OK) break;
 
-        /* Nur transiente Netzfehler wiederholen; echte Fehler (Login abgelehnt)
-         * NICHT. DNS bleibt drin: ein verlorenes erstes DNS-Paket ist derselbe
-         * Kaltstart-Fall. */
+        /* Only retry transient network errors; do NOT retry real errors
+         * (login rejected). DNS stays included: a lost first DNS packet is
+         * the same cold-start case. */
         if (rc != FTP_ERR_TIMEOUT && rc != FTP_ERR_DNS &&
             rc != FTP_ERR_CONNECT && rc != FTP_ERR_DATACONN)
             break;
         if (attempt == 0)
-            FtpClient::stack_poll(500);   /* kurz nachlaufen, dann frisches SYN */
+            FtpClient::stack_poll(500);   /* brief settle, then fresh SYN */
     }
     if (rc != FTP_OK) return rc;
 
@@ -331,20 +332,20 @@ static int perform_connect(void)
 static void do_connect(void)
 {
     if (!g_ftp_ready) {
-        dlg_error(L("FTP nicht verf" ue "gbar", "FTP unavailable"),
-                  L("TCP/IP konnte nicht gestartet werden.\n"
-                    "MTCPCFG pruefen und Programm neu starten.",
-                    "TCP/IP could not be started.\n"
-                    "Check MTCPCFG and restart the program."));
+        dlg_error(L("FTP unavailable", "FTP nicht verf" ue "gbar"),
+                  L("TCP/IP could not be started.\n"
+                    "Check MTCPCFG and restart the program.",
+                    "TCP/IP konnte nicht gestartet werden.\n"
+                    "MTCPCFG pruefen und Programm neu starten."));
         redraw_all();
         return;
     }
 
-    /* Bereits verbunden -> Trennen anbieten. */
+    /* Already connected -> offer to disconnect. */
     if (g_ftp.is_connected()) {
-        if (dlg_confirm(L("Trennen", "Disconnect"),
-                        L("Bestehende FTP-Verbindung trennen?",
-                          "Close the current FTP connection?"))) {
+        if (dlg_confirm(L("Disconnect", "Trennen"),
+                        L("Close the current FTP connection?",
+                          "Bestehende FTP-Verbindung trennen?"))) {
             g_ftp.disconnect();
             g_right.refresh();
         }
@@ -352,7 +353,7 @@ static void do_connect(void)
         return;
     }
 
-    if (!dlg_connect(L("FTP-Verbindung herstellen", "Connect to FTP Server"),
+    if (!dlg_connect(L("Connect to FTP Server", "FTP-Verbindung herstellen"),
                      g_host,    FTP_HOST_MAX - 1,
                      g_portStr, (int)sizeof(g_portStr) - 1,
                      g_user,    (int)sizeof(g_user) - 1,
@@ -363,7 +364,7 @@ static void do_connect(void)
 
     redraw_all();
     if (perform_connect() != FTP_OK) {
-        dlg_error(L("Verbindung fehlgeschlagen", "Connection failed"), g_ftp.last_error());
+        dlg_error(L("Connection failed", "Verbindung fehlgeschlagen"), g_ftp.last_error());
         redraw_all();
         return;
     }
@@ -371,52 +372,52 @@ static void do_connect(void)
 }
 
 /* -------------------------------------------------------------------------
- * F5 - Kopieren zwischen lokalem und Remote-Panel
- * Die Richtung ergibt sich aus dem aktiven Panel:
- *   aktiv = lokal  -> Upload   (STOR) lokal  -> Remote
- *   aktiv = remote -> Download (RETR) Remote -> lokal
+ * F5 - Copy between the local and remote panel
+ * The direction follows the active panel:
+ *   active = local  -> Upload   (STOR) local  -> remote
+ *   active = remote -> Download (RETR) remote -> local
  *
- * Es werden alle markierten Eintraege kopiert (Einfg-Taste); ohne Markierung
- * der Eintrag unter dem Cursor. Verzeichnisse werden rekursiv inkl. aller
- * Unterverzeichnisse kopiert (dircopy.cpp). Beim Kopieren einer einzelnen
- * Datei ohne Markierung laesst sich der Zielname vorher editieren.
+ * All marked entries are copied (Insert key); without marks, the entry
+ * under the cursor. Directories are copied recursively including all
+ * subdirectories (dircopy.cpp). When copying a single file without marks,
+ * the target name can be edited beforehand.
  * ---------------------------------------------------------------------- */
 
-/* Fortschritts-Callback fuer FtpClient::retr/stor (waehrend des Transfers). */
+/* Progress callback for FtpClient::retr/stor (during the transfer). */
 static void copy_progress(void *ctx, unsigned long sofar, unsigned long total)
 {
     (void)ctx;
     dlg_progress_update(sofar, total);
 }
 
-/* Callback fuer dircopy: aktuell bearbeitete Datei/Verzeichnis anzeigen. */
+/* Callback for dircopy: show the file/directory currently being processed. */
 static void copy_item(void *ctx, const char *name, int is_dir)
 {
     (void)ctx; (void)is_dir;
     dlg_progress_setfile(name);
 }
 
-/* Zustand eines (rekursiven) Kopiervorgangs - wird je do_copy() neu angelegt,
- * d.h. "Alle ueberschreiben" gilt nur fuer den aktuellen Vorgang. */
+/* State of a (recursive) copy operation - created fresh per do_copy() call,
+ * i.e. "Overwrite all" only applies to the current operation. */
 struct CopyCtx {
     int overwrite_all;
 };
 
-/* 4-Optionen-Abfrage bei Dateikonflikt. Rueckgabe wie dlg_choice (0..3 / -1). */
+/* 4-option prompt on file conflict. Returns like dlg_choice (0..3 / -1). */
 static int dlg_overwrite(const char *name)
 {
     char        msg[120];
     const char *items[4];
-    sprintf(msg, L("Datei existiert bereits:\n%.40s",
-                   "File already exists:\n%.40s"), name);
-    items[0] = L(Ue "berschreiben",      "Overwrite");
-    items[1] = L("Datei " ue "berspringen", "Skip file");
-    items[2] = L("Alle " ue "berschreiben", "Overwrite all");
-    items[3] = L("Vorgang abbrechen",   "Cancel operation");
-    return dlg_choice(L(Ue "berschreiben?", "Overwrite?"), msg, items, 4);
+    sprintf(msg, L("File already exists:\n%.40s",
+                   "Datei existiert bereits:\n%.40s"), name);
+    items[0] = L("Overwrite",      Ue "berschreiben");
+    items[1] = L("Skip file", "Datei " ue "berspringen");
+    items[2] = L("Overwrite all", "Alle " ue "berschreiben");
+    items[3] = L("Cancel operation",   "Vorgang abbrechen");
+    return dlg_choice(L("Overwrite?", Ue "berschreiben?"), msg, items, 4);
 }
 
-/* Konflikt-Callback fuer dircopy + die Einzeldatei-Stapelfaelle. */
+/* Conflict callback for dircopy + the single-file batch cases. */
 static int copy_conflict(void *vctx, const char *name)
 {
     CopyCtx *c = (CopyCtx *)vctx;
@@ -424,13 +425,13 @@ static int copy_conflict(void *vctx, const char *name)
     if (c && c->overwrite_all) return DC_OVERWRITE;
 
     r = dlg_overwrite(name);
-    if (r == 0) return DC_OVERWRITE;                         /* Ueberschreiben */
-    if (r == 1) return DC_SKIP;                              /* Ueberspringen  */
-    if (r == 2) { if (c) c->overwrite_all = 1; return DC_OVERWRITE; }  /* Alle */
-    return DC_ABORT;                                         /* Abbrechen/Esc  */
+    if (r == 0) return DC_OVERWRITE;                         /* Overwrite     */
+    if (r == 1) return DC_SKIP;                              /* Skip          */
+    if (r == 2) { if (c) c->overwrite_all = 1; return DC_OVERWRITE; }  /* All */
+    return DC_ABORT;                                         /* Cancel/Esc    */
 }
 
-/* 1, falls die lokale Datei existiert (fuer die Ueberschreiben-Abfrage). */
+/* 1 if the local file exists (for the overwrite prompt). */
 static int local_exists(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -438,7 +439,7 @@ static int local_exists(const char *path)
     return 0;
 }
 
-/* Lokalen Pfad "dir\name" zusammensetzen (Wurzel "C:\" beachten), laengensicher. */
+/* Build local path "dir\name" (respecting root "C:\"), length-safe. */
 static void join_local(char *out, int outsz, const char *dir, const char *name)
 {
     int n;
@@ -453,8 +454,8 @@ static void join_local(char *out, int outsz, const char *dir, const char *name)
     strncat(out, name, outsz - 1 - (int)strlen(out));
 }
 
-/* Einzelne Datei interaktiv kopieren (Zielname editierbar, Ueberschreib-Abfrage).
- * to_remote != 0 => Upload (lokal -> Remote), sonst Download. */
+/* Copy a single file interactively (target name editable, overwrite prompt).
+ * to_remote != 0 => upload (local -> remote), otherwise download. */
 static void copy_single_file_interactive(int to_remote, PanelEntry *e)
 {
     char target[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
@@ -462,16 +463,16 @@ static void copy_single_file_interactive(int to_remote, PanelEntry *e)
     int  rc;
 
     if (!to_remote) {
-        /* --- Download: Remote -> lokal --- */
+        /* --- Download: remote -> local --- */
         join_local(target, (int)sizeof(target), g_left.path(), e->name);
-        sprintf(prompt, L("\"%.20s\" laden nach:", "Download \"%.20s\" to:"), e->name);
+        sprintf(prompt, L("Download \"%.20s\" to:", "\"%.20s\" laden nach:"), e->name);
         if (!dlg_input(L("Download", "Download"), prompt, target, (int)sizeof(target) - 1, 0)) { redraw_all(); return; }
         if (target[0] == '\0') { redraw_all(); return; }
 
         if (local_exists(target)) {
             char q[120];
-            sprintf(q, L("Lokale Datei existiert bereits:\n%.40s\n" Ue "berschreiben?",
-                         "Local file already exists:\n%.40s\nOverwrite?"), target);
+            sprintf(q, L("Local file already exists:\n%.40s\nOverwrite?",
+                         "Lokale Datei existiert bereits:\n%.40s\n" Ue "berschreiben?"), target);
             if (!dlg_confirm(L("Download", "Download"), q)) { redraw_all(); return; }
         }
 
@@ -480,22 +481,22 @@ static void copy_single_file_interactive(int to_remote, PanelEntry *e)
         rc = g_ftp.retr(e->name, target, copy_progress, 0);
         dlg_progress_end();
 
-        if (rc != FTP_OK) dlg_error(L("Download fehlgeschlagen", "Download failed"), g_ftp.last_error());
+        if (rc != FTP_OK) dlg_error(L("Download failed", "Download fehlgeschlagen"), g_ftp.last_error());
         g_left.refresh();
     } else {
-        /* --- Upload: lokal -> Remote --- */
+        /* --- Upload: local -> remote --- */
         char localpath[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
         join_local(localpath, (int)sizeof(localpath), g_left.path(), e->name);
         strncpy(target, e->name, sizeof(target) - 1);
         target[sizeof(target) - 1] = '\0';
-        sprintf(prompt, L("\"%.20s\" senden als:", "Upload \"%.20s\" as:"), e->name);
+        sprintf(prompt, L("Upload \"%.20s\" as:", "\"%.20s\" senden als:"), e->name);
         if (!dlg_input(L("Upload", "Upload"), prompt, target, (int)sizeof(target) - 1, 0)) { redraw_all(); return; }
         if (target[0] == '\0') { redraw_all(); return; }
 
         if (g_right.has_entry(target)) {
             char q[120];
-            sprintf(q, L("Remote-Datei existiert bereits:\n%.40s\n" Ue "berschreiben?",
-                         "Remote file already exists:\n%.40s\nOverwrite?"), target);
+            sprintf(q, L("Remote file already exists:\n%.40s\nOverwrite?",
+                         "Remote-Datei existiert bereits:\n%.40s\n" Ue "berschreiben?"), target);
             if (!dlg_confirm(L("Upload", "Upload"), q)) { redraw_all(); return; }
         }
 
@@ -504,16 +505,16 @@ static void copy_single_file_interactive(int to_remote, PanelEntry *e)
         rc = g_ftp.stor(localpath, target, copy_progress, 0);
         dlg_progress_end();
 
-        if (rc != FTP_OK) dlg_error(L("Upload fehlgeschlagen", "Upload failed"), g_ftp.last_error());
+        if (rc != FTP_OK) dlg_error(L("Upload failed", "Upload fehlgeschlagen"), g_ftp.last_error());
         g_right.refresh();
     }
     redraw_all();
 }
 
-/* Einen Eintrag (Datei oder Verzeichnis) im Stapelbetrieb kopieren. Zielname =
- * Quellname im jeweils anderen Panel-Verzeichnis. Verzeichnisse rekursiv.
- * Bei existierender Zieldatei fragt copy_conflict; Rueckgabe FTP_OK,
- * FTP_ERR_ABORT (Benutzerabbruch) oder ein anderer FTP_ERR_* Code. */
+/* Copy one entry (file or directory) in batch mode. Target name = source
+ * name in the other panel's directory. Directories are recursive.
+ * If the target file exists, copy_conflict is asked; returns FTP_OK,
+ * FTP_ERR_ABORT (user cancel) or another FTP_ERR_* code. */
 static int copy_one_entry(int to_remote, PanelEntry *e, CopyCtx *cc)
 {
     char localpath[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
@@ -524,7 +525,7 @@ static int copy_one_entry(int to_remote, PanelEntry *e, CopyCtx *cc)
         if (e->is_dir)
             return dircopy_upload(&g_ftp, localpath, e->name,
                                   copy_item, copy_progress, copy_conflict, cc);
-        /* Einzelne Datei: existiert sie remote schon? */
+        /* Single file: does it already exist remotely? */
         if (g_ftp.remote_file_exists(e->name)) {
             int d = copy_conflict(cc, e->name);
             if (d == DC_ABORT) return FTP_ERR_ABORT;
@@ -536,7 +537,7 @@ static int copy_one_entry(int to_remote, PanelEntry *e, CopyCtx *cc)
         if (e->is_dir)
             return dircopy_download(&g_ftp, e->name, localpath,
                                     copy_item, copy_progress, copy_conflict, cc);
-        /* Einzelne Datei: existiert sie lokal schon? */
+        /* Single file: does it already exist locally? */
         if (local_exists(localpath)) {
             int d = copy_conflict(cc, e->name);
             if (d == DC_ABORT) return FTP_ERR_ABORT;
@@ -558,35 +559,35 @@ static void do_copy(void)
     if (g_active == 0) return;
 
     if (!g_ftp.is_connected()) {
-        dlg_error(L("Kopieren", "Copy"),
-                  L("Keine FTP-Verbindung.\nMit F2 zuerst verbinden.",
-                    "No FTP connection.\nConnect with F2 first."));
+        dlg_error(L("Copy", "Kopieren"),
+                  L("No FTP connection.\nConnect with F2 first.",
+                    "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
         redraw_all();
         return;
     }
 
-    to_remote = (g_active == (Panel *)&g_left);   /* lokal aktiv -> Upload */
+    to_remote = (g_active == (Panel *)&g_left);   /* local active -> upload */
     nmarked   = g_active->marked_count();
     cur       = g_active->selected();
 
-    /* --- Einzeldatei ohne Markierung: interaktiver Komfortpfad --- */
+    /* --- Single file without marks: interactive convenience path --- */
     if (nmarked == 0) {
         if (cur == 0 || cur->is_parent) { redraw_all(); return; }
         if (!cur->is_dir) { copy_single_file_interactive(to_remote, cur); return; }
     }
 
-    /* --- Stapel-/Verzeichnis-Kopie --- */
+    /* --- Batch/directory copy --- */
     total   = (nmarked > 0) ? nmarked : 1;
     destdir = to_remote ? g_right.path() : g_left.path();
 
-    sprintf(q, L("%d Eintrag/Eintr" ae "ge kopieren nach:\n%.40s",
-                 "Copy %d item(s) to:\n%.40s"), total, destdir);
-    if (!dlg_confirm(L("Kopieren", "Copy"), q)) { redraw_all(); return; }
+    sprintf(q, L("Copy %d item(s) to:\n%.40s",
+                 "%d Eintrag/Eintr" ae "ge kopieren nach:\n%.40s"), total, destdir);
+    if (!dlg_confirm(L("Copy", "Kopieren"), q)) { redraw_all(); return; }
 
-    cc.overwrite_all = 0;              /* je Vorgang frisch (kein "Alle" uebernommen) */
+    cc.overwrite_all = 0;              /* fresh per operation (no "all" carries over) */
 
     redraw_all();
-    dlg_progress_begin(L("Kopieren", "Copy"), "");
+    dlg_progress_begin(L("Copy", "Kopieren"), "");
 
     rc = FTP_OK;
     if (nmarked > 0) {
@@ -597,16 +598,16 @@ static void do_copy(void)
             if (rc != FTP_OK) break;
         }
     } else {
-        rc = copy_one_entry(to_remote, cur, &cc);   /* einzelnes Verzeichnis */
+        rc = copy_one_entry(to_remote, cur, &cc);   /* single directory */
     }
 
     dlg_progress_end();
 
     if (rc != FTP_OK && rc != FTP_ERR_ABORT)
-        dlg_error(L("Kopieren fehlgeschlagen", "Copy failed"), g_ftp.last_error());
+        dlg_error(L("Copy failed", "Kopieren fehlgeschlagen"), g_ftp.last_error());
 
-    /* Markierungen aufheben und beide Seiten neu einlesen. Cursor des aktiven
-     * (Quell-)Panels auf dem kopierten Element halten. */
+    /* Clear marks and re-read both sides. Keep the active (source) panel's
+     * cursor on the copied item. */
     {
         char keepname[PANEL_NAME_MAX];
         PanelEntry *sel = g_active->selected();
@@ -619,11 +620,11 @@ static void do_copy(void)
     }
     redraw_all();
     if (rc == FTP_ERR_ABORT)
-        flash_status(L(" Kopieren abgebrochen.", " Copy aborted."));
+        flash_status(L(" Copy aborted.", " Kopieren abgebrochen."));
 }
 
 /* -------------------------------------------------------------------------
- * F3 - Datei anzeigen (lokal direkt, remote ueber temporaeren Download)
+ * F3 - View file (local directly, remote via temporary download)
  * ---------------------------------------------------------------------- */
 static void do_view(void)
 {
@@ -635,27 +636,27 @@ static void do_view(void)
     if (e == 0 || e->is_parent || e->is_dir) { redraw_all(); return; }
 
     if (g_active == (Panel *)&g_left) {
-        /* Lokale Datei direkt anzeigen. */
+        /* View local file directly. */
         join_local(path, (int)sizeof(path), g_left.path(), e->name);
         view_file(path, e->name);
     } else {
-        /* Remote: in temporaere lokale Datei laden, anzeigen, dann loeschen. */
+        /* Remote: download to a temporary local file, view it, then delete it. */
         int rc;
         if (!g_ftp.is_connected()) {
-            dlg_error(L("Anzeigen", "View"),
-                      L("Keine FTP-Verbindung.\nMit F2 zuerst verbinden.",
-                        "No FTP connection.\nConnect with F2 first."));
+            dlg_error(L("View", "Anzeigen"),
+                      L("No FTP connection.\nConnect with F2 first.",
+                        "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
             redraw_all();
             return;
         }
         join_local(path, (int)sizeof(path), g_left.path(), "$NCVIEW$.TMP");
         redraw_all();
-        dlg_progress_begin(L("Anzeigen", "View"), e->name);
+        dlg_progress_begin(L("View", "Anzeigen"), e->name);
         rc = g_ftp.retr(e->name, path, copy_progress, 0);
         dlg_progress_end();
         if (rc != FTP_OK) {
-            remove(path);   /* evtl. angefangene Temp-Datei aufraeumen */
-            dlg_error(L("Anzeigen fehlgeschlagen", "View failed"), g_ftp.last_error());
+            remove(path);   /* clean up any partially started temp file */
+            dlg_error(L("View failed", "Anzeigen fehlgeschlagen"), g_ftp.last_error());
             redraw_all();
             return;
         }
@@ -666,7 +667,7 @@ static void do_view(void)
 }
 
 /* -------------------------------------------------------------------------
- * F4 - Datei bearbeiten (nur lokal)
+ * F4 - Edit file (local only)
  * ---------------------------------------------------------------------- */
 static void do_edit(void)
 {
@@ -679,9 +680,9 @@ static void do_edit(void)
     if (e == 0 || e->is_parent || e->is_dir) { redraw_all(); return; }
 
     if (g_active != (Panel *)&g_left) {
-        dlg_error(L("Bearbeiten", "Edit"),
-                  L("Nur lokale Dateien k" oe "nnen bearbeitet werden.",
-                    "Only local files can be edited."));
+        dlg_error(L("Edit", "Bearbeiten"),
+                  L("Only local files can be edited.",
+                    "Nur lokale Dateien k" oe "nnen bearbeitet werden."));
         redraw_all();
         return;
     }
@@ -690,14 +691,14 @@ static void do_edit(void)
     strcpy(keep, e->name);
     edit_file(path, e->name);
 
-    /* Groesse/Datum koennen sich geaendert haben -> neu lesen, Cursor halten. */
+    /* Size/date may have changed -> re-read, keep the cursor. */
     g_left.refresh();
     g_left.select_by_name(keep);
     redraw_all();
 }
 
 /* -------------------------------------------------------------------------
- * F7 - Verzeichnis erstellen (lokal oder remote)
+ * F7 - Make directory (local or remote)
  * ---------------------------------------------------------------------- */
 static void do_mkdir(void)
 {
@@ -706,7 +707,7 @@ static void do_mkdir(void)
 
     if (g_active == 0) return;
     name[0] = '\0';
-    if (!dlg_input(L("Verzeichnis erstellen", "Make Directory"),
+    if (!dlg_input(L("Make Directory", "Verzeichnis erstellen"),
                    L("Name:", "Name:"), name, PANEL_NAME_MAX - 1, 0)) {
         redraw_all(); return;
     }
@@ -714,22 +715,22 @@ static void do_mkdir(void)
 
     if (g_active == (Panel *)&g_right) {
         if (!g_ftp.is_connected()) {
-            dlg_error(L("Verzeichnis erstellen", "Make Directory"),
-                      L("Keine FTP-Verbindung.\nMit F2 zuerst verbinden.",
-                        "No FTP connection.\nConnect with F2 first."));
+            dlg_error(L("Make Directory", "Verzeichnis erstellen"),
+                      L("No FTP connection.\nConnect with F2 first.",
+                        "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
             redraw_all(); return;
         }
         rc = g_ftp.make_dir(name);
         if (rc != FTP_OK)
-            dlg_error(L("Verzeichnis erstellen", "Make Directory"), g_ftp.last_error());
+            dlg_error(L("Make Directory", "Verzeichnis erstellen"), g_ftp.last_error());
         else
             { g_right.refresh(); g_right.select_by_name(name); }
     } else {
         char path[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
         join_local(path, (int)sizeof(path), g_left.path(), name);
         if (_mkdir(path) != 0)
-            dlg_error(L("Verzeichnis erstellen", "Make Directory"),
-                      L("Konnte Verzeichnis nicht anlegen.", "Could not create directory."));
+            dlg_error(L("Make Directory", "Verzeichnis erstellen"),
+                      L("Could not create directory.", "Konnte Verzeichnis nicht anlegen."));
         else
             { g_left.refresh(); g_left.select_by_name(name); }
     }
@@ -737,11 +738,11 @@ static void do_mkdir(void)
 }
 
 /* -------------------------------------------------------------------------
- * F8 - Loeschen mit Bestaetigung (Datei oder leeres Verzeichnis)
+ * F8 - Delete with confirmation (file or empty directory)
  * ---------------------------------------------------------------------- */
-/* Einen einzelnen Eintrag loeschen (Datei oder LEERES Verzeichnis).
- * Rueckgabe 0 = Erfolg, sonst Fehler (Fehlertext liegt dann in g_ftp bzw.
- * wird vom Aufrufer generisch gemeldet). on_remote != 0 => Remote-Seite. */
+/* Delete a single entry (file or EMPTY directory).
+ * Returns 0 = success, otherwise error (the error text is then in g_ftp,
+ * or the caller reports a generic message). on_remote != 0 => remote side. */
 static int delete_one_entry(int on_remote, PanelEntry *e)
 {
     if (on_remote) {
@@ -754,8 +755,8 @@ static int delete_one_entry(int on_remote, PanelEntry *e)
     }
 }
 
-/* Einen Eintrag rekursiv loeschen (Datei oder ganzer Verzeichnisbaum).
- * Rueckgabe 0 = Erfolg, sonst Fehler. */
+/* Delete an entry recursively (file or whole directory tree).
+ * Returns 0 = success, otherwise error. */
 static int delete_one_recursive(int on_remote, PanelEntry *e)
 {
     if (!e->is_dir) {
@@ -771,7 +772,7 @@ static int delete_one_recursive(int on_remote, PanelEntry *e)
     }
 }
 
-/* Zaehlt den Baum eines Eintrags zu *nf/*nd hinzu (Datei = 1 Datei). */
+/* Adds the tree of an entry to *nf/*nd (a file counts as 1 file). */
 static void count_one(int on_remote, PanelEntry *e, unsigned *nf, unsigned *nd)
 {
     if (!e->is_dir) { (*nf)++; return; }
@@ -795,30 +796,30 @@ static void do_delete(void)
     on_remote = (g_active == (Panel *)&g_right);
 
     if (on_remote && !g_ftp.is_connected()) {
-        dlg_error(L("L" oe "schen", "Delete"),
-                  L("Keine FTP-Verbindung.\nMit F2 zuerst verbinden.",
-                    "No FTP connection.\nConnect with F2 first."));
+        dlg_error(L("Delete", "L" oe "schen"),
+                  L("No FTP connection.\nConnect with F2 first.",
+                    "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
         redraw_all(); return;
     }
 
     nmarked = g_active->marked_count();
     cur     = g_active->selected();
-    keepidx = g_active->selected_index();   /* nach dem Loeschen hier bleiben */
+    keepidx = g_active->selected_index();   /* stay here after deleting */
 
-    /* --- Komfortpfad: einzelne Datei (kein Baum) --- */
+    /* --- Convenience path: single file (no tree) --- */
     if (nmarked == 0) {
         if (cur == 0 || cur->is_parent) { redraw_all(); return; }
         if (!cur->is_dir) {
-            sprintf(prompt, L("Datei \"%.32s\"\nl" oe "schen?",
-                              "Delete file\n\"%.32s\"?"), cur->name);
-            if (!dlg_confirm(L("L" oe "schen", "Delete"), prompt)) { redraw_all(); return; }
+            sprintf(prompt, L("Delete file\n\"%.32s\"?",
+                              "Datei \"%.32s\"\nl" oe "schen?"), cur->name);
+            if (!dlg_confirm(L("Delete", "L" oe "schen"), prompt)) { redraw_all(); return; }
             if (delete_one_entry(on_remote, cur) != 0) {
                 if (on_remote)
-                    dlg_error(L("L" oe "schen fehlgeschlagen", "Delete failed"), g_ftp.last_error());
+                    dlg_error(L("Delete failed", "L" oe "schen fehlgeschlagen"), g_ftp.last_error());
                 else
-                    dlg_error(L("L" oe "schen fehlgeschlagen", "Delete failed"),
-                              L("Datei konnte nicht\ngel" oe "scht werden.",
-                                "Could not delete\nthe file."));
+                    dlg_error(L("Delete failed", "L" oe "schen fehlgeschlagen"),
+                              L("Could not delete\nthe file.",
+                                "Datei konnte nicht\ngel" oe "scht werden."));
             } else {
                 if (on_remote) g_right.refresh(); else g_left.refresh();
                 g_active->set_cursor_index(keepidx);
@@ -828,8 +829,8 @@ static void do_delete(void)
         }
     }
 
-    /* --- Baum-/Stapel-Loeschung: erst zaehlen, dann warnen --- */
-    flash_status(L(" Ermittle Anzahl ...", " Counting ..."));
+    /* --- Tree/batch deletion: count first, then warn --- */
+    flash_status(L(" Counting ...", " Ermittle Anzahl ..."));
     if (nmarked > 0) {
         for (i = 0; i < g_active->entry_count(); i++) {
             PanelEntry *e = g_active->entry_at(i);
@@ -837,16 +838,16 @@ static void do_delete(void)
             count_one(on_remote, e, &nfiles, &ndirs);
         }
     } else {
-        count_one(on_remote, cur, &nfiles, &ndirs);   /* einzelnes Verzeichnis */
+        count_one(on_remote, cur, &nfiles, &ndirs);   /* single directory */
     }
 
-    sprintf(prompt, L("%u Datei(en) und %u Verzeichnis(se)\nunwiderruflich l" oe "schen?",
-                      "Permanently delete\n%u file(s) and %u director(y/ies)?"),
+    sprintf(prompt, L("Permanently delete\n%u file(s) and %u director(y/ies)?",
+                      "%u Datei(en) und %u Verzeichnis(se)\nunwiderruflich l" oe "schen?"),
             nfiles, ndirs);
-    if (!dlg_confirm(L("L" oe "schen", "Delete"), prompt)) { redraw_all(); return; }
+    if (!dlg_confirm(L("Delete", "L" oe "schen"), prompt)) { redraw_all(); return; }
 
     redraw_all();
-    dlg_progress_begin(L("L" oe "schen", "Delete"), "");
+    dlg_progress_begin(L("Delete", "L" oe "schen"), "");
 
     errors = 0;
     if (nmarked > 0) {
@@ -865,15 +866,15 @@ static void do_delete(void)
     if (on_remote) g_right.refresh(); else g_left.refresh();
     g_active->set_cursor_index(keepidx);
     if (errors)
-        dlg_error(L("L" oe "schen", "Delete"),
-                  L("Einige Eintr" ae "ge konnten nicht\nvollst" ae "ndig gel" oe "scht werden.",
-                    "Some items could not be\nfully deleted."));
+        dlg_error(L("Delete", "L" oe "schen"),
+                  L("Some items could not be\nfully deleted.",
+                    "Einige Eintr" ae "ge konnten nicht\nvollst" ae "ndig gel" oe "scht werden."));
     redraw_all();
 }
 
 /* -------------------------------------------------------------------------
- * F6 - Umbenennen (Datei oder Verzeichnis, lokal oder remote)
- * Reines Umbenennen im selben Verzeichnis (kein Verschieben zwischen Panels).
+ * F6 - Rename (file or directory, local or remote)
+ * Plain rename within the same directory (no moving between panels).
  * ---------------------------------------------------------------------- */
 static void do_rename(void)
 {
@@ -888,21 +889,21 @@ static void do_rename(void)
 
     strncpy(newname, e->name, sizeof(newname) - 1);
     newname[sizeof(newname) - 1] = '\0';
-    sprintf(prompt, L("\"%.20s\" umbenennen in:", "Rename \"%.20s\" to:"), e->name);
-    if (!dlg_input(L("Umbenennen", "Rename"), prompt, newname, PANEL_NAME_MAX - 1, 0)) { redraw_all(); return; }
+    sprintf(prompt, L("Rename \"%.20s\" to:", "\"%.20s\" umbenennen in:"), e->name);
+    if (!dlg_input(L("Rename", "Umbenennen"), prompt, newname, PANEL_NAME_MAX - 1, 0)) { redraw_all(); return; }
     if (newname[0] == '\0')            { redraw_all(); return; }
-    if (strcmp(newname, e->name) == 0) { redraw_all(); return; }   /* unveraendert */
+    if (strcmp(newname, e->name) == 0) { redraw_all(); return; }   /* unchanged */
 
     if (g_active == (Panel *)&g_right) {
         if (!g_ftp.is_connected()) {
-            dlg_error(L("Umbenennen", "Rename"),
-                      L("Keine FTP-Verbindung.\nMit F2 zuerst verbinden.",
-                        "No FTP connection.\nConnect with F2 first."));
+            dlg_error(L("Rename", "Umbenennen"),
+                      L("No FTP connection.\nConnect with F2 first.",
+                        "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
             redraw_all(); return;
         }
         rc = g_ftp.rename(e->name, newname);
         if (rc != FTP_OK)
-            dlg_error(L("Umbenennen fehlgeschlagen", "Rename failed"), g_ftp.last_error());
+            dlg_error(L("Rename failed", "Umbenennen fehlgeschlagen"), g_ftp.last_error());
         else
             { g_right.refresh(); g_right.select_by_name(newname); }
     } else {
@@ -911,9 +912,9 @@ static void do_rename(void)
         join_local(oldpath, (int)sizeof(oldpath), g_left.path(), e->name);
         join_local(newpath, (int)sizeof(newpath), g_left.path(), newname);
         if (rename(oldpath, newpath) != 0)
-            dlg_error(L("Umbenennen fehlgeschlagen", "Rename failed"),
-                      L("Konnte nicht umbenennen.\nName ung" ue "ltig oder existiert bereits.",
-                        "Could not rename.\nName invalid or already exists."));
+            dlg_error(L("Rename failed", "Umbenennen fehlgeschlagen"),
+                      L("Could not rename.\nName invalid or already exists.",
+                        "Konnte nicht umbenennen.\nName ung" ue "ltig oder existiert bereits."));
         else
             { g_left.refresh(); g_left.select_by_name(newname); }
     }
@@ -921,13 +922,13 @@ static void do_rename(void)
 }
 
 /* -------------------------------------------------------------------------
- * F9 - Lokales Laufwerk wechseln
- * Nur fuer das lokale Panel sinnvoll (FTP-Seite hat keine Laufwerke). Es
- * werden ausschliesslich vorhandene Laufwerke angeboten.
+ * F9 - Change local drive
+ * Only meaningful for the local panel (the FTP side has no drives). Only
+ * drives that actually exist are offered.
  * ---------------------------------------------------------------------- */
 
-/* 1, falls Laufwerk 'd' (1=A, 2=B, ...) existiert. INT 21h/AX=4409h
- * ("ist Block-Geraet remote?") liefert bei ungueltigem Laufwerk Carry. */
+/* 1 if drive 'd' (1=A, 2=B, ...) exists. INT 21h/AX=4409h
+ * ("is block device remote?") returns carry for an invalid drive. */
 static int drive_present(int d)
 {
     union REGS r;
@@ -953,37 +954,37 @@ static void do_drives(void)
         }
     }
     if (n == 0) {
-        dlg_error(L("Laufwerk", "Drive"),
-                  L("Keine Laufwerke gefunden.", "No drives found."));
+        dlg_error(L("Drive", "Laufwerk"),
+                  L("No drives found.", "Keine Laufwerke gefunden."));
         redraw_all(); return;
     }
 
-    cur = _getdrive();                 /* aktuelles Laufwerk (1=A) */
+    cur = _getdrive();                 /* current drive (1=A) */
     initial = 0;
     { int i; for (i = 0; i < n; i++) if (letters[i] == cur) initial = i; }
 
-    sel = dlg_menu(L("Laufwerk w" ae "hlen", "Select Drive"), items, n, initial);
+    sel = dlg_menu(L("Select Drive", "Laufwerk w" ae "hlen"), items, n, initial);
     if (sel < 0) { redraw_all(); return; }
 
     newd = letters[sel];
     if (newd != cur) {
         char test[PANEL_HEADER_MAX];
         _chdrive(newd);
-        /* getcwd schlaegt fehl, wenn das Laufwerk nicht bereit ist (leere
-         * Diskette). Der Harderr-Handler verhindert die DOS-Abfrage. */
+        /* getcwd fails if the drive isn't ready (empty floppy). The harderr
+         * handler prevents the DOS prompt. */
         if (getcwd(test, sizeof(test)) == 0) {
-            _chdrive(cur);             /* zurueck auf das alte Laufwerk */
-            dlg_error(L("Laufwerk", "Drive"),
-                      L("Laufwerk nicht bereit.", "Drive not ready."));
+            _chdrive(cur);             /* revert to the old drive */
+            dlg_error(L("Drive", "Laufwerk"),
+                      L("Drive not ready.", "Laufwerk nicht bereit."));
             redraw_all(); return;
         }
         g_left.refresh();
     }
-    set_active((Panel *)&g_left);      /* Laufwerkswechsel betrifft das lokale Panel */
+    set_active((Panel *)&g_left);      /* drive change affects the local panel */
     redraw_all();
 }
 
-/* Kurzhilfe (/?) auf stdout - laeuft vor tui_init, daher normale Ausgabe. */
+/* Brief help (/?) on stdout - runs before tui_init, so plain output. */
 static void print_usage(void)
 {
     printf("NCFTP386 v" APP_VERSION " - Dual-Panel FTP Client for DOS\n");
@@ -1003,28 +1004,28 @@ static void print_usage(void)
 }
 
 /* -------------------------------------------------------------------------
- * Main / Event-Loop
+ * Main / event loop
  * ---------------------------------------------------------------------- */
 int main(int argc, char *argv[])
 {
     int running = 1;
     int i;
 
-    /* Sprache aus der DOS-Laendereinstellung bestimmen (vor jeder Ausgabe). */
+    /* Determine language from the DOS country setting (before any output). */
     i18n_init();
 
-    /* Gemerkte Verbindung laden (NCFTP.SAV neben der EXE). Fuellt g_host etc.;
-     * fehlt die Datei, bleiben die Vorgaben stehen. */
+    /* Load the remembered connection (NCFTP.SAV next to the EXE). Fills
+     * g_host etc.; if the file is missing, the defaults remain. */
     connsave_init(argv[0]);
     connsave_load(g_host, (int)sizeof(g_host), g_portStr, (int)sizeof(g_portStr),
                   g_user, (int)sizeof(g_user), g_pass, (int)sizeof(g_pass), &g_savepw);
 
-    /* Kommandozeile parsen (ueberschreibt die geladenen Werte). Einheitliche
-     * Syntax /X bzw. /X:Wert; '-' statt '/' ebenfalls erlaubt. Das Flag-Zeichen
-     * ist case-insensitiv, der WERT wird unveraendert uebernommen (Passwort und
-     * Benutzer bleiben damit Gross-/Kleinschreibung-genau).
-     *   /L:DE|EN  Sprache      /H:Host (+Auto-Connect)  /P:Port
-     *   /U:User   /W:Passwort  /S:ALL|NOPASS|OFF        /? Hilfe */
+    /* Parse the command line (overrides the loaded values). Uniform syntax
+     * /X or /X:value; '-' is also allowed instead of '/'. The flag letter
+     * is case-insensitive, the VALUE is taken verbatim (so password and
+     * user stay exactly as cased).
+     *   /L:DE|EN  language     /H:Host (+auto-connect)  /P:Port
+     *   /U:User   /W:Password  /S:ALL|NOPASS|OFF        /? Help */
     {
         int want_help = 0;
         for (i = 1; i < argc; i++) {
@@ -1034,11 +1035,11 @@ int main(int argc, char *argv[])
 
             if (*o == '/' || *o == '-') o++;
             f = (char)tolower((unsigned char)o[0]);
-            /* Wert = Rest nach ':' (falls vorhanden), sonst leer. */
+            /* Value = remainder after ':' (if present), otherwise empty. */
             val = (o[1] == ':') ? (o + 2) : "";
 
             switch (f) {
-            case 'l':   /* Sprache: Wert case-insensitiv */
+            case 'l':   /* language: value is case-insensitive */
                 if (val[0] == 'e' || val[0] == 'E') g_english = 1;
                 else if (val[0] == 'd' || val[0] == 'D') g_english = 0;
                 break;
@@ -1073,14 +1074,14 @@ int main(int argc, char *argv[])
         if (want_help) { print_usage(); return 0; }
     }
 
-    /* Kritische DOS-Fehler (leeres Laufwerk usw.) automatisch fehlschlagen
-     * lassen, statt die TUI mit "Abort, Retry, Fail?" zu zerstoeren. */
+    /* Make critical DOS errors (empty drive etc.) fail automatically
+     * instead of letting "Abort, Retry, Fail?" wreck the TUI. */
     _harderr(ncftp_harderr);
 
-    /* mTCP-Stack VOR tui_init starten: parseEnv/initStack koennen bei Fehler
-     * auf stderr schreiben - tui_init loescht den Schirm anschliessend. Schlaegt
-     * es fehl (z.B. MTCPCFG fehlt / kein Packet-Driver), laeuft das Programm
-     * als reiner lokaler Dateimanager weiter; F2 meldet dann den Fehler. */
+    /* Start the mTCP stack BEFORE tui_init: parseEnv/initStack may write to
+     * stderr on error - tui_init then clears the screen. If it fails (e.g.
+     * MTCPCFG missing / no packet driver), the program keeps running as a
+     * plain local file manager; F2 then reports the error. */
     g_ftp_ready = (FtpClient::init_stack() == FTP_OK) ? 1 : 0;
     g_right.attach(&g_ftp);
 
@@ -1096,20 +1097,20 @@ int main(int argc, char *argv[])
 
     if (!g_nosplash) dlg_splash(APP_VERSION);
 
-    /* Auto-Connect, wenn ein Host auf der Kommandozeile stand (-h).
-     * Direkt nach dem Start ist der Packet-Treiber gerade erst eingehaengt und
-     * der Link noch kalt - daher den Stack kurz warmlaufen lassen, bevor der
-     * erste Verbindungsversuch startet. Den transienten Retry erledigt
-     * perform_connect() selbst (gilt damit auch fuer F2). */
+    /* Auto-connect if a host was given on the command line (-h).
+     * Right after startup the packet driver has only just been hooked in
+     * and the link is still cold - so let the stack warm up briefly before
+     * the first connection attempt. perform_connect() itself handles the
+     * transient retry (so this also applies to F2). */
     if (g_autoconnect) {
         if (g_ftp_ready) {
-            FtpClient::stack_poll(750);            /* Treiber/Link setteln lassen */
+            FtpClient::stack_poll(750);            /* let the driver/link settle */
             if (perform_connect() != FTP_OK)
-                dlg_error(L("Verbindung fehlgeschlagen", "Connection failed"), g_ftp.last_error());
+                dlg_error(L("Connection failed", "Verbindung fehlgeschlagen"), g_ftp.last_error());
             redraw_all();
         } else {
-            flash_status(L(" FTP nicht verf" ue "gbar (MTCPCFG?).",
-                           " FTP unavailable (MTCPCFG?)."));
+            flash_status(L(" FTP unavailable (MTCPCFG?).",
+                           " FTP nicht verf" ue "gbar (MTCPCFG?)."));
         }
     }
 
@@ -1120,10 +1121,10 @@ int main(int argc, char *argv[])
     while (running) {
         int key;
 
-        /* Leerlauf: auf Taste warten und dabei die Verbindung pflegen.
-         *  - Uhr jede Sekunde aktualisieren,
-         *  - bei bestehender Verbindung den Stack treiben + Abbruch erkennen,
-         *  - alle 60 s ein NOOP senden (Keepalive gegen Server-Idle-Timeout). */
+        /* Idle: wait for a key while keeping the connection alive.
+         *  - update the clock every second,
+         *  - while connected, drive the stack + detect disconnects,
+         *  - send a NOOP every 60 s (keepalive against server idle timeout). */
         while (running && !key_pending()) {
             time_t now = time(0);
             if (now != last_clock) { draw_clock(); last_clock = now; }
@@ -1138,7 +1139,7 @@ int main(int argc, char *argv[])
         }
 
         key = readkey();
-        last_noop = time(0);    /* Tastenaktivitaet -> Keepalive-Timer neu */
+        last_noop = time(0);    /* key activity -> restart the keepalive timer */
 
         switch (key) {
         case KEY_TAB:
@@ -1156,11 +1157,11 @@ int main(int argc, char *argv[])
         case KEY_HOME: g_active->move_home(); g_active->draw(); draw_statusbar(); break;
         case KEY_END:  g_active->move_end();  g_active->draw(); draw_statusbar(); break;
 
-        case KEY_INS:  /* Markierung umschalten + Cursor nach unten (Norton-Stil) */
+        case KEY_INS:  /* toggle mark + move cursor down (Norton style) */
             g_active->toggle_mark(); draw_statusbar(); break;
-        case KEY_STAR: /* Numpad *: alle Markierungen invertieren (NC-Stil) */
+        case KEY_STAR: /* numpad *: invert all marks (NC style) */
             g_active->invert_marks(); draw_statusbar(); break;
-        case KEY_PLUS: { /* Numpad +: fehlende/abweichende Dateien markieren */
+        case KEY_PLUS: { /* numpad +: mark missing/different files */
             const Panel *other = (g_active == (Panel *)&g_left)
                                  ? (const Panel *)&g_right
                                  : (const Panel *)&g_left;
@@ -1176,7 +1177,7 @@ int main(int argc, char *argv[])
                 if (g_active == (Panel *)&g_right && g_right.nav_failed())
                     flash_status(g_right.last_error());
             }
-            /* sonst: Datei -> Anzeigen (wie F3). */
+            /* otherwise: file -> view (like F3). */
             else {
                 do_view();
             }
@@ -1190,19 +1191,10 @@ int main(int argc, char *argv[])
                 flash_status(g_right.last_error());
             break;
 
-        /* Funktionstasten. */
+        /* Function keys. */
         case KEY_F1:
-            dlg_message(L("Hilfe", "Help"),
-                L("Tab        Panel wechseln\n"
-                  "Einfg      Eintrag markieren (mehrere kopieren/l" oe "schen)\n"
-                  "*          Markierung invertieren\n"
-                  "+          Fehlende/abweichende Dateien gg. anderem Panel markieren\n"
-                  "Enter      Verzeichnis betreten / Datei anzeigen\n"
-                  "Backspace  " Ue "bergeordnetes Verzeichnis\n"
-                  "F2 Verbinden  F3 Anzeigen  F4 Bearbeiten\n"
-                  "F5 Kopieren (rekursiv)  F6 Umbenennen\n"
-                  "F7 MkDir  F8 L" oe "schen  F9 Laufwerk  F10 Ende",
-                  "Tab        Switch panel\n"
+            dlg_message(L("Help", "Hilfe"),
+                L("Tab        Switch panel\n"
                   "Insert     Mark item (copy/delete several)\n"
                   "*          Invert selection\n"
                   "+          Mark files missing or different in other panel\n"
@@ -1210,7 +1202,16 @@ int main(int argc, char *argv[])
                   "Backspace  Parent directory\n"
                   "F2 Connect  F3 View  F4 Edit\n"
                   "F5 Copy (recursive)  F6 Rename\n"
-                  "F7 MkDir  F8 Delete  F9 Drive  F10 Quit"), 0);
+                  "F7 MkDir  F8 Delete  F9 Drive  F10 Quit",
+                  "Tab        Panel wechseln\n"
+                  "Einfg      Eintrag markieren (mehrere kopieren/l" oe "schen)\n"
+                  "*          Markierung invertieren\n"
+                  "+          Fehlende/abweichende Dateien gg. anderem Panel markieren\n"
+                  "Enter      Verzeichnis betreten / Datei anzeigen\n"
+                  "Backspace  " Ue "bergeordnetes Verzeichnis\n"
+                  "F2 Verbinden  F3 Anzeigen  F4 Bearbeiten\n"
+                  "F5 Kopieren (rekursiv)  F6 Umbenennen\n"
+                  "F7 MkDir  F8 L" oe "schen  F9 Laufwerk  F10 Ende"), 0);
             break;
         case KEY_F2:  do_connect(); break;
         case KEY_F3:  do_view(); break;
@@ -1220,11 +1221,11 @@ int main(int argc, char *argv[])
         case KEY_F7:  do_mkdir(); break;
         case KEY_F8:  do_delete(); break;
         case KEY_F9:  do_drives(); break;
-        case KEY_ALT_F1: do_drives(); break;   /* geheim: wie F9 (NC-Veteranen) */
+        case KEY_ALT_F1: do_drives(); break;   /* secret: same as F9 (for NC veterans) */
 
         case KEY_F10:
-            if (dlg_confirm(L("Beenden", "Quit"),
-                            L("NCFTP386 wirklich beenden?", "Really quit NCFTP386?")))
+            if (dlg_confirm(L("Quit", "Beenden"),
+                            L("Really quit NCFTP386?", "NCFTP386 wirklich beenden?")))
                 running = 0;
             break;
 
@@ -1232,9 +1233,9 @@ int main(int argc, char *argv[])
             break;
         }
     }
-    }   /* Ende Leerlauf-/Event-Block */
+    }   /* end of idle/event block */
 
-    /* Sauber trennen und mTCP-Stack zurueckgeben. */
+    /* Disconnect cleanly and release the mTCP stack. */
     if (g_ftp.is_connected())
         g_ftp.disconnect();
     if (g_ftp_ready)

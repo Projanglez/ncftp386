@@ -1,23 +1,23 @@
 /* =============================================================================
- * keymap.h - Tastatur-Codes, readkey() und Aktions-Enum fuer NCFTP386
+ * keymap.h - Key codes, readkey(), and the action enum for NCFTP386
  * -----------------------------------------------------------------------------
- * DOS-Tastatur via getch(): normale Tasten liefern ihren ASCII-Code, erweiterte
- * Tasten (Pfeile, Funktionstasten) liefern zuerst 0, dann den Scancode. readkey()
- * fasst das zu einem 9-bit-Code zusammen: erweiterte Tasten => 0x100 | scancode.
+ * DOS keyboard via getch(): normal keys return their ASCII code, extended
+ * keys (arrows, function keys) return 0 first, then the scan code. readkey()
+ * combines that into a 9-bit code: extended keys => 0x100 | scancode.
  * ===========================================================================*/
 #ifndef KEYMAP_H
 #define KEYMAP_H
 
 #include <conio.h>
 
-/* ---- Normale Tasten (ASCII) ---- */
+/* ---- Normal keys (ASCII) ---- */
 #define KEY_ENTER   0x0D
 #define KEY_ESC     0x1B
 #define KEY_TAB     0x09
 #define KEY_BACKSP  0x08
 #define KEY_SPACE   0x20
 
-/* ---- Erweiterte Tasten (0x100 | Scancode) ---- */
+/* ---- Extended keys (0x100 | scancode) ---- */
 #define KEY_UP      0x148
 #define KEY_DOWN    0x150
 #define KEY_LEFT    0x14B
@@ -39,15 +39,15 @@
 #define KEY_F9      0x143
 #define KEY_F10     0x144
 
-/* Alt+Funktionstasten (geheime Shortcuts). Alt+F1 liefert Scancode 0x68. */
+/* Alt+function keys (hidden shortcuts). Alt+F1 returns scan code 0x68. */
 #define KEY_ALT_F1  0x168
 
-/* Numpad-Tasten: im Panel-Kontext unbelegt, Norton-Commander-Stil.
- * Numpad * und + sind ASCII und nicht von den gleichnamigen Tasten unterscheidbar. */
-#define KEY_STAR    0x2A  /* Markierung invertieren                              */
-#define KEY_PLUS    0x2B  /* Fehlende/abweichende Dateien geg. anderem Panel markieren */
+/* Numpad keys: unused in the panel context, Norton Commander style.
+ * Numpad * and + are ASCII and indistinguishable from the like-named keys. */
+#define KEY_STAR    0x2A  /* invert marks                                          */
+#define KEY_PLUS    0x2B  /* mark files missing/differing vs. the other panel      */
 
-/* Eine Taste lesen (blockierend). Erweiterte Tasten => 0x100 | Scancode. */
+/* Read one key (blocking). Extended keys => 0x100 | scancode. */
 inline int readkey(void)
 {
     int k = getch();
@@ -56,7 +56,7 @@ inline int readkey(void)
     return k;
 }
 
-/* Steht eine Taste bereit? (nicht-blockierend, fuer die Leerlaufschleife). */
+/* Is a key available? (non-blocking, for the idle loop). */
 inline int key_pending(void)
 {
     return kbhit();

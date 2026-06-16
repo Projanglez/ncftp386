@@ -1,5 +1,5 @@
 /* =============================================================================
- * i18n.cpp - Spracherkennung ueber die DOS-Laendereinstellung
+ * i18n.cpp - Language detection via the DOS country setting
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  * ===========================================================================*/
@@ -8,9 +8,9 @@
 
 #include "i18n.h"
 
-int g_english = 0;             /* Default: Deutsch (wird in i18n_init gesetzt) */
+int g_english = 0;             /* Default: German (set in i18n_init) */
 
-const char *L(const char *de, const char *en)
+const char *L(const char *en, const char *de)
 {
     return g_english ? en : de;
 }
@@ -19,19 +19,19 @@ void i18n_init(void)
 {
     union REGS   in, out;
     struct SREGS sr;
-    static unsigned char ctybuf[34];     /* Puffer fuer die Laenderinfo (DS:DX) */
+    static unsigned char ctybuf[34];     /* buffer for the country info (DS:DX) */
     void far *p = (void far *)ctybuf;
 
     segread(&sr);
     in.h.ah = 0x38;            /* DOS: Get Country Dependent Information */
-    in.h.al = 0x00;            /* 0 = aktuelles Land                    */
+    in.h.al = 0x00;            /* 0 = current country                   */
     in.x.dx = FP_OFF(p);
     sr.ds   = FP_SEG(p);
     intdosx(&in, &out, &sr);
 
-    /* Fehler (Carry) -> sicherheitshalber Englisch. */
+    /* Error (carry) -> default to English to be safe. */
     if (out.x.cflag) { g_english = 1; return; }
 
-    /* Laendercode in BX. Deutschsprachig: DE=49, AT=43, CH=41. */
+    /* Country code in BX. German-speaking: DE=49, AT=43, CH=41. */
     g_english = (out.x.bx == 49 || out.x.bx == 43 || out.x.bx == 41) ? 0 : 1;
 }

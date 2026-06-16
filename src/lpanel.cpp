@@ -1,5 +1,5 @@
 /* =============================================================================
- * lpanel.cpp - Lokales Dateisystem-Panel
+ * lpanel.cpp - Local filesystem panel
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  * ===========================================================================*/
@@ -10,8 +10,8 @@
 
 #include "lpanel.h"
 
-/* Letzten Pfadbestandteil ("Blattname") ermitteln. "C:\FOO\BAR" -> "BAR",
- * "C:\" -> "" (Wurzel hat kein Blatt). */
+/* Determine the last path component ("leaf name"). "C:\FOO\BAR" -> "BAR",
+ * "C:\" -> "" (the root has no leaf). */
 static void path_leaf(const char *path, char *out, int outsz)
 {
     const char *p, *leaf = path;
@@ -27,17 +27,17 @@ LocalPanel::LocalPanel()
     cwd[0] = '\0';
 }
 
-/* Aktuelles Arbeitsverzeichnis (inkl. Laufwerk) ermitteln. */
+/* Determine the current working directory (including drive). */
 void LocalPanel::read_cwd()
 {
     if (getcwd(cwd, PANEL_HEADER_MAX) == 0) {
-        /* Fallback, falls getcwd scheitert. */
+        /* Fallback in case getcwd fails. */
         strcpy(cwd, "C:\\");
     }
 }
 
-/* qsort-Vergleich: ".." zuerst, dann Verzeichnisse, dann Dateien,
- * jeweils alphabetisch (gross/klein egal). */
+/* qsort comparator: ".." first, then directories, then files,
+ * each alphabetically (case-insensitive). */
 int LocalPanel::compare(const void *a, const void *b)
 {
     const PanelEntry *ea = (const PanelEntry *)a;
@@ -50,7 +50,7 @@ int LocalPanel::compare(const void *a, const void *b)
     return stricmp(ea->name, eb->name);
 }
 
-/* Verzeichnis neu einlesen. Rueckgabe: Anzahl Eintraege. */
+/* Re-read the directory. Returns: number of entries. */
 int LocalPanel::refresh()
 {
     struct find_t ff;
@@ -64,7 +64,7 @@ int LocalPanel::refresh()
 
     rc = _dos_findfirst("*.*", amask, &ff);
     while (rc == 0 && count < PANEL_MAX_ENTRIES) {
-        /* "." (aktuelles Verzeichnis) ueberspringen. */
+        /* Skip "." (the current directory). */
         if (!(ff.name[0] == '.' && ff.name[1] == '\0')) {
             PanelEntry *e = &entries[count];
             strncpy(e->name, ff.name, PANEL_NAME_MAX - 1);
@@ -88,9 +88,9 @@ int LocalPanel::refresh()
     return count;
 }
 
-/* Enter auf dem markierten Eintrag.
- * Rueckgabe: 1 = Verzeichnis betreten (Panel neu eingelesen),
- *            0 = Datei (Aufrufer behandelt Anzeigen/Starten). */
+/* Enter on the selected entry.
+ * Returns: 1 = entered a directory (panel re-read),
+ *          0 = file (caller handles viewing/launching it). */
 int LocalPanel::enter_selected()
 {
     PanelEntry *e = selected();
@@ -98,7 +98,7 @@ int LocalPanel::enter_selected()
     if (!e->is_dir)    return 0;
 
     if (e->is_parent) {
-        /* Hochwechseln: danach Cursor auf das verlassene Verzeichnis. */
+        /* Going up: afterwards put the cursor on the directory we left. */
         char leaf[PANEL_NAME_MAX];
         path_leaf(cwd, leaf, sizeof(leaf));
         chdir("..");
@@ -111,8 +111,8 @@ int LocalPanel::enter_selected()
     return 1;
 }
 
-/* Backspace: ins uebergeordnete Verzeichnis (am Wurzelverzeichnis wirkungslos).
- * Danach steht der Cursor auf dem soeben verlassenen Verzeichnis. */
+/* Backspace: go to the parent directory (no effect at the root).
+ * Afterwards the cursor sits on the directory just left. */
 void LocalPanel::go_parent()
 {
     char leaf[PANEL_NAME_MAX];

@@ -1,13 +1,13 @@
 /* =============================================================================
- * rpanel.cpp - FTP-Remote-Panel
+ * rpanel.cpp - FTP remote panel
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  *
- * LIST-Parsing:
+ * LIST parsing:
  *   Unix:  "drwxr-xr-x  2 user group  4096 Jan  1 12:00 name"
- *          Anker = Monatsname; davor die Groesse, danach Tag + Zeit/Jahr + Name.
+ *          anchor = month name; before it the size, after it day + time/year + name.
  *   DOS:   "12-25-2023  09:30AM       <DIR>          name"
- *          bzw. "... 09:30AM   1234 datei.txt"
+ *          or "... 09:30AM   1234 file.txt"
  * ===========================================================================*/
 #include <string.h>   /* strchr, strncpy, strnicmp, stricmp, memcpy   */
 #include <stdlib.h>   /* qsort, strtoul, atoi                         */
@@ -19,7 +19,7 @@
 #include "i18n.h"
 
 /* ------------------------------------------------------------------ */
-/* Kleine Helfer                                                       */
+/* Small helpers                                                       */
 /* ------------------------------------------------------------------ */
 
 static const char *MONTHS[12] = {
@@ -27,7 +27,7 @@ static const char *MONTHS[12] = {
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 
-/* 3-Zeichen-Token -> Monat 1..12, sonst 0. */
+/* 3-character token -> month 1..12, otherwise 0. */
 static int month_num(const char *tok, int len)
 {
     if (len != 3) return 0;
@@ -44,7 +44,7 @@ static int all_digits(const char *s, int len)
     return 1;
 }
 
-/* Token klassifizieren: 1 = "HH:MM" (Zeit), 2 = "JJJJ" (Jahr), 0 = keins. */
+/* Classify a token: 1 = "HH:MM" (time), 2 = "YYYY" (year), 0 = neither. */
 static int time_or_year(const char *s, int len)
 {
     int i, hasColon = 0;
@@ -72,7 +72,7 @@ static unsigned make_time(int hh, int mm)
     return (unsigned)(((hh & 0x1F) << 11) | ((mm & 0x3F) << 5));
 }
 
-/* Name kopieren: fuehrt bis PANEL_NAME_MAX, schneidet trailing CR/LF/Space ab. */
+/* Copy a name: up to PANEL_NAME_MAX, trims trailing CR/LF/space. */
 static void copy_name(char *dst, const char *src)
 {
     int n = 0;
@@ -82,7 +82,7 @@ static void copy_name(char *dst, const char *src)
     dst[n] = '\0';
 }
 
-/* Token in einen kleinen Puffer kopieren (null-terminiert). */
+/* Copy a token into a small buffer (NUL-terminated). */
 static void copy_tok(char *dst, const char *line, int off, int len, int cap)
 {
     if (len > cap) len = cap;
@@ -97,7 +97,7 @@ static int current_year(void)
     return (int)d.year;
 }
 
-/* Letzter Pfadbestandteil eines Remote-Pfads ("/pub/games" -> "games"). */
+/* Last path component of a remote path ("/pub/games" -> "games"). */
 static void path_leaf(const char *path, char *out, int outsz)
 {
     const char *p, *leaf = path;
@@ -108,7 +108,7 @@ static void path_leaf(const char *path, char *out, int outsz)
     out[n] = '\0';
 }
 
-/* Zeile in Tokens zerlegen (Offsets/Laengen). Rueckgabe: Anzahl Tokens. */
+/* Split a line into tokens (offsets/lengths). Returns: number of tokens. */
 static int tokenize(const char *line, int *off, int *tlen, int maxtok)
 {
     int i = 0, nt = 0;
@@ -125,7 +125,7 @@ static int tokenize(const char *line, int *off, int *tlen, int maxtok)
 }
 
 /* ------------------------------------------------------------------ */
-/* Konstruktor                                                         */
+/* Constructor                                                         */
 /* ------------------------------------------------------------------ */
 RemotePanel::RemotePanel()
 {
@@ -136,7 +136,7 @@ RemotePanel::RemotePanel()
 }
 
 /* ------------------------------------------------------------------ */
-/* Sortierung: ".." zuerst, dann Verzeichnisse, dann Dateien (alphab.) */
+/* Sorting: ".." first, then directories, then files (alphabetically) */
 /* ------------------------------------------------------------------ */
 int RemotePanel::compare(const void *a, const void *b)
 {
@@ -149,12 +149,12 @@ int RemotePanel::compare(const void *a, const void *b)
 }
 
 /* ------------------------------------------------------------------ */
-/* Unix-"ls -l"-Format                                                 */
+/* Unix "ls -l" format                                                 */
 /* ------------------------------------------------------------------ */
 static int parse_unix(const char *line, int curYear, PanelEntry *e)
 {
     char c0 = line[0];
-    if (!strchr("-dlbcps", c0)) return 0;       /* kein Permission-Block */
+    if (!strchr("-dlbcps", c0)) return 0;       /* not a permission block */
 
     int isDir  = (c0 == 'd');
     int isLink = (c0 == 'l');
@@ -163,8 +163,8 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
     int nt = tokenize(line, off, tlen, 16);
     if (nt < 4) return 0;
 
-    /* Monats-Anker suchen: tok[k]=Monat, tok[k-1]=Groesse(Zahl),
-     * tok[k+1]=Tag(Zahl), tok[k+2]=Zeit/Jahr, tok[k+3..]=Name. */
+    /* Find the month anchor: tok[k]=month, tok[k-1]=size(number),
+     * tok[k+1]=day(number), tok[k+2]=time/year, tok[k+3..]=name. */
     int k, m = -1, tyType = 0;
     for (k = 1; k + 3 < nt; k++) {
         if (!month_num(line + off[k], tlen[k])) continue;
@@ -178,14 +178,14 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
 
     char buf[24];
 
-    /* Groesse */
+    /* Size */
     unsigned long size = 0;
     if (!isDir) {
         copy_tok(buf, line, off[m - 1], tlen[m - 1], 23);
         size = strtoul(buf, 0, 10);
     }
 
-    /* Datum: Monat / Tag / (Zeit|Jahr) */
+    /* Date: month / day / (time|year) */
     int month = month_num(line + off[m], tlen[m]);
     copy_tok(buf, line, off[m + 1], tlen[m + 1], 23);
     int day = atoi(buf);
@@ -198,11 +198,11 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
         sscanf(buf, "%d:%d", &hh, &mm);
     }
 
-    /* Name = ab Token m+3 (Rest der Zeile, kann Leerzeichen enthalten). */
+    /* Name = from token m+3 onward (rest of the line, may contain spaces). */
     const char *nm = line + off[m + 3];
     copy_name(e->name, nm);
 
-    /* Symlink: "name -> ziel" -> nur den Namen behalten. */
+    /* Symlink: "name -> target" -> keep only the name. */
     if (isLink) {
         char *arrow = strstr(e->name, " -> ");
         if (arrow) *arrow = '\0';
@@ -217,28 +217,28 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* MS-DOS / IIS-Format                                                 */
+/* MS-DOS / IIS format                                                 */
 /* ------------------------------------------------------------------ */
 static int parse_dos(const char *line, PanelEntry *e)
 {
     if (!isdigit((unsigned char)line[0])) return 0;
-    if (line[2] != '-' && line[2] != '/') return 0;       /* Datum MM-TT-.. */
+    if (line[2] != '-' && line[2] != '/') return 0;       /* date MM-DD-.. */
 
     int off[6], tlen[6];
     int nt = tokenize(line, off, tlen, 6);
-    if (nt < 4) return 0;                                 /* Datum Zeit DIR/Size Name */
+    if (nt < 4) return 0;                                 /* date time DIR/size name */
 
     char d0[16], t1[16], sz[24];
     copy_tok(d0, line, off[0], tlen[0], 15);
     copy_tok(t1, line, off[1], tlen[1], 15);
     copy_tok(sz, line, off[2], tlen[2], 23);
 
-    /* Datum MM-TT-JJ oder MM/TT/JJJJ */
+    /* Date MM-DD-YY or MM/DD/YYYY */
     int mo = 0, da = 0, yr = 0;
     if (sscanf(d0, "%d%*c%d%*c%d", &mo, &da, &yr) != 3) return 0;
     if (yr < 100) yr += (yr < 70) ? 2000 : 1900;
 
-    /* Zeit HH:MM mit optionalem AM/PM */
+    /* Time HH:MM with optional AM/PM */
     int hh = 0, mm = 0;
     sscanf(t1, "%d:%d", &hh, &mm);
     {
@@ -264,7 +264,7 @@ static int parse_dos(const char *line, PanelEntry *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* Oeffentlicher Parser (Unix- oder DOS-Format)                        */
+/* Public parser (Unix or DOS format)                                  */
 /* ------------------------------------------------------------------ */
 int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e)
 {
@@ -275,7 +275,7 @@ int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* LIST-Callback                                                       */
+/* LIST callback                                                       */
 /* ------------------------------------------------------------------ */
 void RemotePanel::on_line(void *ctx, const char *line)
 {
@@ -287,9 +287,9 @@ void RemotePanel::add_line(const char *line)
     if (count >= PANEL_MAX_ENTRIES) return;
 
     PanelEntry tmp;
-    if (!ftp_parse_list_line(line, curYear, &tmp)) return;          /* nicht lesbar */
+    if (!ftp_parse_list_line(line, curYear, &tmp)) return;          /* not parseable */
 
-    /* "." und ".." aus dem Listing verwerfen (".." fuegen wir selbst hinzu). */
+    /* Discard "." and ".." from the listing (we add ".." ourselves). */
     if (tmp.name[0] == '\0') return;
     if (tmp.name[0] == '.' && tmp.name[1] == '\0') return;
     if (tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0') return;
@@ -298,7 +298,7 @@ void RemotePanel::add_line(const char *line)
 }
 
 /* ------------------------------------------------------------------ */
-/* refresh: aktuelles Remote-Verzeichnis listen                        */
+/* refresh: list the current remote directory                         */
 /* ------------------------------------------------------------------ */
 int RemotePanel::refresh()
 {
@@ -308,12 +308,12 @@ int RemotePanel::refresh()
     navFailed = 0;
 
     if (!ftp || !ftp->is_connected()) {
-        strcpy(header, L("(nicht verbunden)", "(not connected)"));
+        strcpy(header, L("(not connected)", "(nicht verbunden)"));
         cwd[0] = '\0';
         return 0;
     }
 
-    /* Aktuellen Pfad ermitteln (fuer Header). */
+    /* Determine the current path (for the header). */
     if (ftp->get_cwd(cwd, PANEL_HEADER_MAX) != FTP_OK) {
         strcpy(cwd, "/");
     }
@@ -321,7 +321,7 @@ int RemotePanel::refresh()
 
     curYear = current_year();
 
-    /* ".."-Eintrag immer anbieten. */
+    /* Always offer a ".." entry. */
     {
         PanelEntry *e = &entries[count++];
         strcpy(e->name, "..");
@@ -350,7 +350,7 @@ int RemotePanel::enter_selected()
 
     int rc;
     if (e->is_parent) {
-        /* Hochwechseln: danach Cursor auf das verlassene Verzeichnis. */
+        /* Going up: afterwards put the cursor on the directory we left. */
         char leaf[PANEL_NAME_MAX];
         path_leaf(cwd, leaf, sizeof(leaf));
         rc = ftp->parent_dir();
@@ -358,9 +358,9 @@ int RemotePanel::enter_selected()
         select_by_name(leaf);
     } else {
         rc = ftp->change_dir(e->name);
-        refresh();                   /* listet den neuen Stand */
+        refresh();                   /* lists the new state */
     }
-    if (rc != FTP_OK) navFailed = 1; /* refresh() hat navFailed zurueckgesetzt */
+    if (rc != FTP_OK) navFailed = 1; /* refresh() already reset navFailed */
     return 1;
 }
 

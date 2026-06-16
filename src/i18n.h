@@ -1,22 +1,22 @@
 /* =============================================================================
- * i18n.h - Zweisprachigkeit (Deutsch / Englisch) fuer NCFTP386
+ * i18n.h - Bilingual support (English / German) for NCFTP386
  * -----------------------------------------------------------------------------
- * Die Sprache wird beim Start aus der DOS-Laendereinstellung (INT 21h/38h,
- * gesetzt ueber COUNTRY= in CONFIG.SYS) ermittelt: Deutschland/Oesterreich/
- * Schweiz -> Deutsch, alles andere -> Englisch.
+ * The language is determined at startup from the DOS country setting
+ * (INT 21h/38h, set via COUNTRY= in CONFIG.SYS): Germany/Austria/
+ * Switzerland -> German, everything else -> English.
  *
- * Verwendung im Code:  dlg_error(L("Fehler", "Error"), L("...", "..."));
+ * Usage in code:  dlg_error(L("Error", "Fehler"), L("...", "..."));
  * ===========================================================================*/
 #ifndef I18N_H
 #define I18N_H
 
-extern int g_english;          /* 0 = Deutsch, 1 = English */
+extern int g_english;          /* 0 = German, 1 = English */
 
-/* Sprache aus der DOS-Laendereinstellung bestimmen (einmal beim Start). */
+/* Determine the language from the DOS country setting (once at startup). */
 void i18n_init(void);
 
-/* Liefert je nach erkannter Sprache den deutschen (de) oder englischen (en)
- * Text. Beide Zeichenketten sind statische Literale, daher gefahrlos. */
-const char *L(const char *de, const char *en);
+/* Returns the English (en) or German (de) text depending on the detected
+ * language. Both strings are static literals, so this is always safe. */
+const char *L(const char *en, const char *de);
 
 #endif /* I18N_H */

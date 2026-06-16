@@ -1,15 +1,15 @@
 /* =============================================================================
- * connsave.cpp - Letzte FTP-Verbindung persistent merken
+ * connsave.cpp - Remember the last FTP connection persistently
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  *
- * Dateiformat (Text, editierbar), NCFTP.SAV neben der EXE:
- *     # NCFTP386 gespeicherte Verbindung / saved connection
+ * File format (text, editable), NCFTP.SAV next to the EXE:
+ *     # NCFTP386 saved connection
  *     host=ftp.example.org
  *     port=21
  *     user=anonymous
  *     savepw=1
- *     pass=4A1F...        <- XOR(Schluessel) + Hex; leer wenn savepw=0
+ *     pass=4A1F...        <- XOR(key) + hex; empty when savepw=0
  * ===========================================================================*/
 #include <stdio.h>
 #include <stdlib.h>    /* _splitpath, _makepath, atoi, _MAX_*           */
@@ -18,14 +18,14 @@
 
 #include "connsave.h"
 
-/* Fester Schluessel fuer die XOR-Verschleierung. KEINE echte Verschluesselung -
- * nur damit das Passwort nicht im Klartext in der Datei steht. */
+/* Fixed key for the XOR obfuscation. NOT real encryption -
+ * just so the password isn't stored in plain text in the file. */
 static const char XKEY[] = "NCFTP386";
 
-static char g_path[160] = "";   /* voller Pfad der Speicherdatei */
+static char g_path[160] = "";   /* full path of the save file */
 
 /* ------------------------------------------------------------------ */
-/* Pfad festlegen                                                      */
+/* Determine the path                                                  */
 /* ------------------------------------------------------------------ */
 void connsave_init(const char *argv0)
 {
@@ -35,12 +35,12 @@ void connsave_init(const char *argv0)
     else                   { drive[0] = 0; dir[0] = 0; }
 
     if (drive[0] || dir[0]) {
-        /* Verzeichnis der EXE; _splitpath liefert dir inkl. abschliessendem '\'. */
+        /* EXE's directory; _splitpath returns dir including a trailing '\'. */
         _makepath(g_path, drive, dir, "NCFTP386", "SAV");
         return;
     }
 
-    /* Fallback: aktuelles (Start-)Verzeichnis. */
+    /* Fallback: current (start) directory. */
     {
         char cwd[128];
         int  n;
@@ -54,7 +54,7 @@ void connsave_init(const char *argv0)
 }
 
 /* ------------------------------------------------------------------ */
-/* XOR + Hex                                                           */
+/* XOR + hex                                                           */
 /* ------------------------------------------------------------------ */
 static int hexval(char c)
 {
@@ -64,7 +64,7 @@ static int hexval(char c)
     return -1;
 }
 
-/* src -> hex(src[i] ^ XKEY[i%klen]). dst muss >= 2*strlen(src)+1 sein. */
+/* src -> hex(src[i] ^ XKEY[i%klen]). dst must be >= 2*strlen(src)+1. */
 static void obfus_hex(const char *src, char *dst)
 {
     int i, klen = (int)sizeof(XKEY) - 1;
@@ -75,7 +75,7 @@ static void obfus_hex(const char *src, char *dst)
     dst[i * 2] = '\0';
 }
 
-/* hex -> dst (entschluesselt). Bricht bei ungueltigem Zeichen sauber ab. */
+/* hex -> dst (decrypted). Stops cleanly on an invalid character. */
 static void deobfus_hex(const char *hex, char *dst, int dstsz)
 {
     int i = 0, o = 0, klen = (int)sizeof(XKEY) - 1;
@@ -91,7 +91,7 @@ static void deobfus_hex(const char *hex, char *dst, int dstsz)
 }
 
 /* ------------------------------------------------------------------ */
-/* Laden                                                               */
+/* Load                                                                 */
 /* ------------------------------------------------------------------ */
 int connsave_load(char *host, int hostsz, char *port, int portsz,
                   char *user, int usersz, char *pass, int passsz, int *savepw)
@@ -128,7 +128,7 @@ int connsave_load(char *host, int hostsz, char *port, int portsz,
 }
 
 /* ------------------------------------------------------------------ */
-/* Speichern                                                           */
+/* Save                                                                 */
 /* ------------------------------------------------------------------ */
 void connsave_store(const char *host, const char *port,
                     const char *user, const char *pass, int savepw)
@@ -139,7 +139,7 @@ void connsave_store(const char *host, const char *port,
     f = fopen(g_path, "w");
     if (!f) return;
 
-    fprintf(f, "# NCFTP386 gespeicherte Verbindung / saved connection\n");
+    fprintf(f, "# NCFTP386 saved connection\n");
     fprintf(f, "host=%s\n", host ? host : "");
     fprintf(f, "port=%s\n", port ? port : "");
     fprintf(f, "user=%s\n", user ? user : "");

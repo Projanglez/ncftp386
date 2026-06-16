@@ -1,9 +1,9 @@
 /* =============================================================================
- * lpanel.h - Lokales Dateisystem-Panel (linke Bildschirmseite)
+ * lpanel.h - Local filesystem panel (left side of the screen)
  * -----------------------------------------------------------------------------
- * Liest das aktuelle DOS-Verzeichnis via _dos_findfirst/_dos_findnext, sortiert
- * (".." zuerst, dann Verzeichnisse, dann Dateien - jeweils alphabetisch) und
- * stellt es als Norton-Commander-Panel dar. Enter wechselt in Verzeichnisse.
+ * Reads the current DOS directory via _dos_findfirst/_dos_findnext, sorts it
+ * (".." first, then directories, then files - each alphabetically) and
+ * renders it as a Norton Commander panel. Enter switches into directories.
  * ===========================================================================*/
 #ifndef LPANEL_H
 #define LPANEL_H
@@ -14,17 +14,17 @@ class LocalPanel : public Panel {
 public:
     LocalPanel();
 
-    int  refresh();             /* aktuelles Verzeichnis neu einlesen        */
-    int  enter_selected();      /* override: 1 = Verzeichniswechsel, 0 = Datei */
-    void go_parent();           /* override: ins uebergeordnete Verzeichnis  */
+    int  refresh();             /* re-read the current directory             */
+    int  enter_selected();      /* override: 1 = changed directory, 0 = file */
+    void go_parent();           /* override: switch to the parent directory  */
 
     const char *path() const { return cwd; }
 
 private:
-    char cwd[PANEL_HEADER_MAX]; /* aktuelles Arbeitsverzeichnis (mit Laufwerk)*/
+    char cwd[PANEL_HEADER_MAX]; /* current working directory (with drive)    */
 
-    void read_cwd();            /* cwd aus DOS holen                          */
-    static int compare(const void *a, const void *b); /* qsort-Vergleich     */
+    void read_cwd();            /* fetch cwd from DOS                         */
+    static int compare(const void *a, const void *b); /* qsort comparator    */
 };
 
 #endif /* LPANEL_H */

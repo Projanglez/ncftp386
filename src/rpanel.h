@@ -1,13 +1,13 @@
 /* =============================================================================
- * rpanel.h - FTP-Remote-Panel (rechte Bildschirmseite)
+ * rpanel.h - FTP remote panel (right side of the screen)
  * -----------------------------------------------------------------------------
- * Holt das Verzeichnis-Listing ueber FtpClient::list() und wandelt die rohen
- * LIST-Textzeilen in PanelEntry um. Unterstuetzt das Unix-"ls -l"-Format und
- * (als Bonus) das MS-DOS/IIS-Format. Enter wechselt per CWD in Verzeichnisse,
- * Backspace per CDUP nach oben.
+ * Fetches the directory listing via FtpClient::list() and converts the raw
+ * LIST text lines into PanelEntry records. Supports the Unix "ls -l" format
+ * and (as a bonus) the MS-DOS/IIS format. Enter changes directories via CWD,
+ * Backspace goes up via CDUP.
  *
- * Das Panel haelt nur einen Zeiger auf den (extern verwalteten) FtpClient.
- * Ohne Verbindung zeigt es eine leere Liste mit Hinweis im Header.
+ * The panel only holds a pointer to the (externally managed) FtpClient.
+ * Without a connection it shows an empty list with a note in the header.
  * ===========================================================================*/
 #ifndef RPANEL_H
 #define RPANEL_H
@@ -15,41 +15,41 @@
 #include "panel.h"
 #include "ftpcli.h"
 
-/* Eine rohe LIST-Zeile in einen PanelEntry parsen (Unix- oder DOS/IIS-Format).
- * curYear liefert das Jahr fuer Zeilen, die nur eine Uhrzeit (kein Jahr) tragen.
- * Rueckgabe 1 = erkannt (e gefuellt: name, size, date, is_dir, marked=0),
- *           0 = Zeile nicht als Eintrag erkennbar. Wird auch vom rekursiven
- * Verzeichnis-Download (dircopy.cpp) genutzt. */
+/* Parse one raw LIST line into a PanelEntry (Unix or DOS/IIS format).
+ * curYear supplies the year for lines that only carry a time (no year).
+ * Returns 1 = recognized (e filled in: name, size, date, is_dir, marked=0),
+ *         0 = line not recognizable as an entry. Also used by the recursive
+ * directory download (dircopy.cpp). */
 int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e);
 
 class RemotePanel : public Panel {
 public:
     RemotePanel();
 
-    /* Den (extern angelegten) FTP-Client zuordnen. */
+    /* Attach the (externally created) FTP client. */
     void attach(FtpClient *client) { ftp = client; }
 
-    int  refresh();             /* aktuelles Remote-Verzeichnis neu listen     */
-    int  enter_selected();      /* override: 1 = Verzeichniswechsel, 0 = Datei */
-    void go_parent();           /* override: CDUP                              */
+    int  refresh();             /* re-list the current remote directory       */
+    int  enter_selected();      /* override: 1 = changed directory, 0 = file  */
+    void go_parent();           /* override: CDUP                             */
 
     const char *path() const { return cwd; }
 
-    /* Letzte Navigations-/Listing-Aktion fehlgeschlagen? + Fehlertext. */
+    /* Did the last navigation/listing action fail? + error text. */
     int         nav_failed() const { return navFailed; }
     const char *last_error() const { return ftp ? ftp->last_error() : ""; }
 
 private:
     FtpClient *ftp;
-    char cwd[PANEL_HEADER_MAX];  /* aktueller Remote-Pfad (per PWD)             */
-    int  navFailed;             /* 1 = letzte Aktion meldete einen Fehler      */
-    int  curYear;               /* aktuelles Jahr (fuer Datumszeilen mit Zeit) */
+    char cwd[PANEL_HEADER_MAX];  /* current remote path (via PWD)              */
+    int  navFailed;             /* 1 = the last action reported an error       */
+    int  curYear;               /* current year (for date lines with a time)  */
 
-    /* LIST-Callback (ftpcli ruft pro Roh-Zeile auf). */
+    /* LIST callback (ftpcli calls this for every raw line). */
     static void on_line(void *ctx, const char *line);
     void add_line(const char *line);
 
-    static int compare(const void *a, const void *b);  /* qsort-Vergleich */
+    static int compare(const void *a, const void *b);  /* qsort comparator */
 };
 
 #endif /* RPANEL_H */

@@ -1,8 +1,8 @@
 /* =============================================================================
- * tui.cpp - TUI-Engine fuer NCFTP386
+ * tui.cpp - TUI engine for NCFTP386
  * -----------------------------------------------------------------------------
- * Implementierung: direkter far-Pointer-Zugriff auf den Textbildschirmspeicher
- * bei 0xB800:0000 (Farbadapter). Cursor- und Modussteuerung ueber BIOS INT 10h.
+ * Implementation: direct far-pointer access to the text screen memory at
+ * 0xB800:0000 (color adapter). Cursor and mode control via BIOS INT 10h.
  *
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  * ===========================================================================*/
@@ -11,25 +11,25 @@
 
 #include "tui.h"
 
-/* Segment des Farb-Textspeichers. Monochrom-Adapter laegen bei 0xB000 - wir
- * setzen Farbe voraus (vgl. CLAUDE.md, ATTR_PANEL = weiss auf blau). */
+/* Segment of the color text memory. Monochrome adapters sit at 0xB000 - we
+ * assume color (see CLAUDE.md, ATTR_PANEL = white on blue). */
 #define VIDEO_SEG 0xB800u
 
-/* Far-Pointer auf die linke obere Bildschirmzelle. Als Funktion gekapselt,
- * damit MK_FP nicht als statischer Initialisierer ausgewertet werden muss. */
+/* Far pointer to the top-left screen cell. Wrapped in a function so MK_FP
+ * doesn't have to be evaluated as a static initializer. */
 static unsigned char far *vidmem(void)
 {
     return (unsigned char far *)MK_FP(VIDEO_SEG, 0);
 }
 
 /* -------------------------------------------------------------------------
- * Initialisierung / Aufraeumen
+ * Init / shutdown
  * ---------------------------------------------------------------------- */
 void tui_init(void)
 {
     union REGS r;
 
-    /* Videomodus 03h = 80x25 Farb-Text. Setzt zugleich den Bildschirm zurueck. */
+    /* Video mode 03h = 80x25 color text. Also resets the screen. */
     r.h.ah = 0x00;
     r.h.al = 0x03;
     int86(0x10, &r, &r);
@@ -40,14 +40,14 @@ void tui_init(void)
 
 void tui_shutdown(void)
 {
-    /* Bildschirm in "normalen" DOS-Farben loeschen und Cursor zurueckholen. */
+    /* Clear the screen to "normal" DOS colors and bring back the cursor. */
     clear_screen(0x07);
     set_cursor(0, 0);
     show_cursor(1);
 }
 
 /* -------------------------------------------------------------------------
- * Grundlegende Ausgabe
+ * Basic output
  * ---------------------------------------------------------------------- */
 void clear_screen(unsigned char attr)
 {
@@ -85,7 +85,7 @@ void fill_rect(int row, int col, int rows, int cols, char ch, unsigned char attr
 {
     int r, c, r2, c2;
 
-    /* Rechteck auf den sichtbaren Bereich zuschneiden. */
+    /* Clip the rectangle to the visible area. */
     r2 = row + rows;
     c2 = col + cols;
     if (row < 0) row = 0;
@@ -117,7 +117,7 @@ void vline(int row, int col, int len, char ch, unsigned char attr)
 }
 
 /* -------------------------------------------------------------------------
- * Rahmen & Text
+ * Borders & text
  * ---------------------------------------------------------------------- */
 void draw_box(int row, int col, int rows, int cols, unsigned char attr, int dbl)
 {
@@ -134,13 +134,13 @@ void draw_box(int row, int col, int rows, int cols, unsigned char attr, int dbl)
         hz = BOX_S_HLINE; vt = BOX_S_VLINE;
     }
 
-    /* Ecken */
+    /* Corners */
     putchar_at(row,            col,            (char)tl, attr);
     putchar_at(row,            col + cols - 1, (char)tr, attr);
     putchar_at(row + rows - 1, col,            (char)bl, attr);
     putchar_at(row + rows - 1, col + cols - 1, (char)br, attr);
 
-    /* Kanten */
+    /* Edges */
     hline(row,            col + 1, cols - 2, (char)hz, attr);
     hline(row + rows - 1, col + 1, cols - 2, (char)hz, attr);
     vline(row + 1,        col,            rows - 2, (char)vt, attr);
@@ -189,7 +189,7 @@ void set_cursor(int row, int col)
     union REGS r;
 
     r.h.ah = 0x02;            /* Set Cursor Position */
-    r.h.bh = 0x00;            /* Anzeigeseite 0      */
+    r.h.bh = 0x00;            /* display page 0      */
     r.h.dh = (unsigned char)row;
     r.h.dl = (unsigned char)col;
     int86(0x10, &r, &r);
@@ -201,17 +201,17 @@ void show_cursor(int visible)
 
     r.h.ah = 0x01;            /* Set Cursor Type */
     if (visible) {
-        r.h.ch = 0x06;        /* normale Cursor-Scanlines 6..7 */
+        r.h.ch = 0x06;        /* normal cursor scanlines 6..7 */
         r.h.cl = 0x07;
     } else {
-        r.h.ch = 0x20;        /* Bit 5 gesetzt = Cursor unsichtbar */
+        r.h.ch = 0x20;        /* bit 5 set = cursor invisible */
         r.h.cl = 0x00;
     }
     int86(0x10, &r, &r);
 }
 
 /* -------------------------------------------------------------------------
- * Bildschirm sichern / wiederherstellen
+ * Save / restore screen
  * ---------------------------------------------------------------------- */
 void save_screen(unsigned char far *buf)
 {

@@ -1,13 +1,13 @@
 /*
    NCFTP386 - ftpcli.cpp
-   FTP-Protokoll-Statemachine ueber mTCP (immer PASV-Modus).
+   FTP protocol state machine over mTCP (always PASV mode).
 
-   Die Operationen sind blockierend implementiert: Jede Warteschleife
-   treibt den mTCP-Stack (PACKET_PROCESS_SINGLE / Arp / Tcp) selbst an und
-   bricht nach Timeout ab. Das passt zum synchronen TUI-Ablauf, bei dem der
-   Benutzer auf den Abschluss einer Aktion wartet (spaeter mit Fortschritt).
+   The operations are implemented as blocking calls: every wait loop drives
+   the mTCP stack itself (PACKET_PROCESS_SINGLE / Arp / Tcp) and bails out
+   after a timeout. This matches the synchronous TUI flow, where the user
+   waits for an action to complete (progress reporting comes later).
 
-   Referenz: mtcp/APPS/FTP/FTP.CPP
+   Reference: mtcp/APPS/FTP/FTP.CPP
 */
 
 #include <stdio.h>
@@ -19,7 +19,7 @@
 #include "ftpcli.h"
 #include "i18n.h"
 
-/* mTCP (Reihenfolge wie im Referenz-Client) */
+/* mTCP (same order as in the reference client) */
 #include "types.h"
 #include "utils.h"
 #include "timer.h"
@@ -30,28 +30,28 @@
 #include "tcp.h"
 #include "tcpsockm.h"
 
-/* Nach allen System-/mTCP-Headern: kurze Umlaut-Makros fuer deutsche Texte. */
+/* After all system/mTCP headers: short umlaut macros for German text. */
 #include "umlaut.h"
 
 
-/* --- Konstanten ------------------------------------------------------- */
-#define CTRL_TIMEOUT_MS     30000ul   /* 30s fuer Kontrollbefehle (CLAUDE.md) */
-#define DATA_TIMEOUT_MS     60000ul   /* 60s fuer Datentransfer               */
-/* 5s: ein verlorenes erstes SYN (Kaltstart) scheitert schnell, statt 15s zu
- * verbrennen, bevor der App-seitige Retry (perform_connect) ein frisches SYN
- * schickt. mTCPs eigene SYN-Wiederholung kommt erst nach ~10s - zu spaet. */
+/* --- Constants ----------------------------------------------------------- */
+#define CTRL_TIMEOUT_MS     30000ul   /* 30s for control commands (CLAUDE.md) */
+#define DATA_TIMEOUT_MS     60000ul   /* 60s for data transfers               */
+/* 5s: a lost first SYN (cold start) fails fast instead of burning 15s before
+ * the app-level retry (perform_connect) sends a fresh SYN. mTCP's own SYN
+ * retry only kicks in after ~10s - too late for that purpose. */
 #define CONNECT_TIMEOUT_MS  5000ul
 #define CONTROL_RECV_SIZE    1024
-#define DATA_RECV_SIZE      16384   /* mTCP-Maximum; grosses Empfangsfenster    */
-/* Lese-/Schreibblock fuer Transfers. Beim Download wird der TCP-Empfangspuffer
- * pro Schleifendurchlauf KOMPLETT geleert (siehe retr()), darum reicht ein
- * mittlerer Block - er muss nur >= MSS sein, damit wir schneller leeren als der
- * Server fuellt. */
+#define DATA_RECV_SIZE      16384   /* mTCP maximum; large receive window      */
+/* Read/write block size for transfers. On download, the TCP receive buffer
+ * is drained COMPLETELY on every loop pass (see retr()), so a medium-sized
+ * block is enough - it only needs to be >= MSS so we drain faster than the
+ * server fills it. */
 #define DATA_CHUNK           4096
 
 
-/* --- Datei-lokaler Zustand ------------------------------------------- */
-static int g_stackUp = 0;             /* wurde initStack erfolgreich? */
+/* --- File-local state ----------------------------------------------------- */
+static int g_stackUp = 0;             /* did initStack succeed?       */
 static uint16_t g_nextLocalPort = 4096;
 
 static uint16_t nextLocalPort(void) {
@@ -60,28 +60,28 @@ static uint16_t nextLocalPort(void) {
     return p;
 }
 
-/* Den mTCP-Stack einmal antreiben (in jeder Warteschleife noetig). */
+/* Drive the mTCP stack once (needed in every wait loop). */
 static void driveStack(void) {
     PACKET_PROCESS_SINGLE;
     Arp::driveArp();
     Tcp::drivePackets();
 }
 
-/* Verstrichene Millisekunden seit Ticks-Wert. */
+/* Milliseconds elapsed since the given tick value. */
 static unsigned long elapsedMs(clockTicks_t start) {
     return (unsigned long)Timer_diff(start, TIMER_GET_CURRENT()) * TIMER_TICK_LEN;
 }
 
-/* Datenverbindung 'ds' so weit wie moeglich in 'f' leeren (RETR-Download).
- * Das Empfangsfenster bleibt so offen; sonst faellt es unter eine MSS bzw. auf 0,
- * der Server stoppt (Silly Window Syndrome) und sendet bis zu seinem eigenen
- * Persist-Probe (serverabhaengig, oft mehrere Sekunden) nichts mehr. mTCP selbst
- * meldet das Fenster sofort wieder, sobald wir aus dem Null-Zustand recv()'en
- * (TcpSocket::recv -> sendPureAck, mtcp/TCPLIB/TCP.CPP); mTCPs eigener Zero-Window-
- * Probe-Intervall ist 1s (TCP_PROBE_INTERVAL, TCPINC/TCP.H) - einen 5s-Timer gibt
- * es in mTCP nicht. Verhalten gegen mTCP 2025-01-10 verifiziert. Rueckgabe: >0
- * Bytes geschrieben (zu *total addiert), 0 nichts da, -1 Schreibfehler, -2
- * Verbindung geschlossen. */
+/* Drain the data connection 'ds' into 'f' as far as possible (RETR download).
+ * This keeps the receive window open; otherwise it drops below one MSS or to
+ * zero, the server stalls (Silly Window Syndrome) and sends nothing further
+ * until its own persist probe fires (server-dependent, often several
+ * seconds). mTCP itself re-announces the window immediately once we recv()
+ * out of the zero state (TcpSocket::recv -> sendPureAck, mtcp/TCPLIB/TCP.CPP);
+ * mTCP's own zero-window probe interval is 1s (TCP_PROBE_INTERVAL,
+ * TCPINC/TCP.H) - there is no 5s timer in mTCP. Behavior verified against
+ * mTCP 2025-01-10. Returns: >0 bytes written (added to *total), 0 nothing
+ * available, -1 write error, -2 connection closed. */
 static int drainToFile(TcpSocket *ds, FILE *f, uint8_t *buf, int bufsz,
                        unsigned long *total) {
     int16_t n;
@@ -95,28 +95,28 @@ static int drainToFile(TcpSocket *ds, FILE *f, uint8_t *buf, int bufsz,
     return wrote;
 }
 
-/* Kontext fuer das Leeren der Datenverbindung WAEHREND readReply() auf die
- * RETR-"150"-Antwort wartet - so laeuft der Empfangspuffer am Transferstart
- * nicht voll (sonst einmaliger Stillstand, siehe drainToFile). */
+/* Context for draining the data connection WHILE readReply() is waiting for
+ * the RETR "150" reply - so the receive buffer doesn't fill up right at the
+ * start of the transfer (otherwise a one-time stall, see drainToFile). */
 struct DrainCtx {
     TcpSocket     *ds;
     FILE          *f;
     uint8_t       *buf;
     int            sz;
     unsigned long *total;
-    int            err;     /* wird auf 1 gesetzt bei Schreibfehler */
+    int            err;     /* set to 1 on a write error */
 };
 
 
 /* ===================================================================== */
-/* Stack-Initialisierung (statisch, einmalig)                            */
+/* Stack initialization (static, one-time)                               */
 /* ===================================================================== */
 
-/* mTCP 2025-01-10: Utils::initStack installiert eigene Ctrl-Break (INT 1Bh)-
- * und Ctrl-C (INT 23h)-Handler und verlangt dafuer echte Funktionszeiger
- * (kein NULL, sonst Absturz). In der TUI sollen Ctrl-Break/Ctrl-C das
- * Programm NICHT abbrechen; der Handler setzt nur ein Flag, das wir bewusst
- * ignorieren. Utils::endStack stellt die Original-Handler wieder her. */
+/* mTCP 2025-01-10: Utils::initStack installs its own Ctrl-Break (INT 1Bh)
+ * and Ctrl-C (INT 23h) handlers and requires real function pointers for
+ * that (no NULL, or it crashes). In the TUI, Ctrl-Break/Ctrl-C should NOT
+ * abort the program; the handler just sets a flag that we deliberately
+ * ignore. Utils::endStack restores the original handlers. */
 static volatile uint8_t g_ctrlBreakDetected = 0;
 
 static void __interrupt __far ctrlBreakHandler(void) {
@@ -125,7 +125,7 @@ static void __interrupt __far ctrlBreakHandler(void) {
 
 int FtpClient::init_stack(void) {
     if (g_stackUp) return FTP_OK;
-    /* Liest MTCPCFG env-Variable + Konfigurationsdatei. */
+    /* Reads the MTCPCFG env variable + the configuration file. */
     if (Utils::parseEnv() != 0) return FTP_ERR_GENERAL;
     if (Utils::initStack(TCP_MAX_SOCKETS, TCP_MAX_XMIT_BUFS,
                          ctrlBreakHandler, ctrlBreakHandler) != 0) return FTP_ERR_GENERAL;
@@ -148,7 +148,7 @@ void FtpClient::stack_poll(unsigned ms) {
 
 
 /* ===================================================================== */
-/* Konstruktor / Fehlerhilfen                                            */
+/* Constructor / error helpers                                           */
 /* ===================================================================== */
 
 FtpClient::FtpClient() {
@@ -167,14 +167,14 @@ void FtpClient::setError(const char *msg) {
     errmsg[FTP_ERRMSG_MAX - 1] = 0;
 }
 
-/* errmsg = "<prefix> (<code>) <reply-text>", laengenbegrenzt. */
+/* errmsg = "<prefix> (<code>) <reply text>", length-limited. */
 void FtpClient::setErrorReply(const char *prefix) {
     sprintf(errmsg, "%.40s (%d) %.100s", prefix, lastCode, replyText);
 }
 
 
 /* ===================================================================== */
-/* Senden / Empfangen auf der Steuerverbindung                           */
+/* Send / receive on the control connection                              */
 /* ===================================================================== */
 
 int FtpClient::sendRaw(const char *buf, int len) {
@@ -190,10 +190,10 @@ int FtpClient::sendRaw(const char *buf, int len) {
             off += n;
             start = TIMER_GET_CURRENT();
         } else if (n == 0) {
-            /* derzeit keine Sendepuffer frei -> weiter antreiben */
-            if (elapsedMs(start) > CTRL_TIMEOUT_MS) { setError(L("Sende-Timeout", "Send timeout")); return FTP_ERR_TIMEOUT; }
+            /* no send buffers free right now -> keep driving */
+            if (elapsedMs(start) > CTRL_TIMEOUT_MS) { setError(L("Send timeout", "Sende-Timeout")); return FTP_ERR_TIMEOUT; }
         } else {
-            setError(L("Steuerverbindung verloren", "Control connection lost"));
+            setError(L("Control connection lost", "Steuerverbindung verloren"));
             return FTP_ERR_PROTO;
         }
     }
@@ -220,10 +220,10 @@ int FtpClient::sendCmdArg(const char *cmd, const char *arg) {
     return sendRaw(buf, n);
 }
 
-/* Liest eine vollstaendige (ggf. mehrzeilige) FTP-Antwort.
-   Rueckgabe: 3-stelliger Code, oder negativer FTP_ERR_* Wert.
-   drainCtxv != 0 (nur RETR-"150"): waehrend des Wartens die Datenverbindung
-   leeren, damit ihr Empfangspuffer nicht voll-laeuft. */
+/* Reads one complete (possibly multi-line) FTP reply.
+   Returns: 3-digit code, or a negative FTP_ERR_* value.
+   drainCtxv != 0 (RETR "150" only): drain the data connection while
+   waiting, so its receive buffer doesn't fill up. */
 int FtpClient::readReply(void *drainCtxv) {
     TcpSocket *s = (TcpSocket *)ctrl;
     if (!s) return FTP_ERR_PROTO;
@@ -259,7 +259,7 @@ int FtpClient::readReply(void *drainCtxv) {
                 if (haveCode)
                     code = (line[0] - '0') * 100 + (line[1] - '0') * 10 + (line[2] - '0');
 
-                /* Klartext der Zeile (ohne "NNN ") merken. */
+                /* Remember the plain text of the line (without "NNN "). */
                 if (len > 4) {
                     strncpy(replyText, line + 4, FTP_LINE_MAX - 1);
                 } else {
@@ -275,36 +275,36 @@ int FtpClient::readReply(void *drainCtxv) {
                         lastCode = code;
                         return code;
                     }
-                    /* Zeile ohne Code vor dem Reply -> ignorieren */
+                    /* Line without a code before the reply -> ignore */
                 } else {
                     if (haveCode && sep == ' ' && code == firstCode) {
                         lastCode = code;
                         return code;
                     }
-                    /* Fortsetzungszeile -> weiterlesen */
+                    /* Continuation line -> keep reading */
                 }
                 len = 0;
                 continue;
             }
             if (len < FTP_LINE_MAX - 1) line[len++] = (char)ch;
-            /* sonst: ueberlange Zeile -> Rest verwerfen */
+            /* otherwise: line too long -> discard the rest */
         } else if (n == 0) {
             if (s->isRemoteClosed() && !s->recvDataWaiting()) {
-                setError(L("Server hat die Verbindung geschlossen", "Server closed the connection"));
+                setError(L("Server closed the connection", "Server hat die Verbindung geschlossen"));
                 return FTP_ERR_PROTO;
             }
             if (elapsedMs(start) > CTRL_TIMEOUT_MS) {
-                setError(L("Zeit" ue "berschreitung beim Warten auf Serverantwort", "Timeout waiting for server reply"));
+                setError(L("Timeout waiting for server reply", "Zeit" ue "berschreitung beim Warten auf Serverantwort"));
                 return FTP_ERR_TIMEOUT;
             }
         } else {
-            setError(L("Steuerverbindung verloren", "Control connection lost"));
+            setError(L("Control connection lost", "Steuerverbindung verloren"));
             return FTP_ERR_PROTO;
         }
     }
 }
 
-/* Befehl senden + Antwort lesen; Erfolg bei 2xx. */
+/* Send a command + read the reply; success on 2xx. */
 int FtpClient::simpleCmd(const char *cmd, const char *arg) {
     int rc = (arg && arg[0]) ? sendCmdArg(cmd, arg) : sendCmd(cmd);
     if (rc != FTP_OK) return rc;
@@ -316,7 +316,7 @@ int FtpClient::simpleCmd(const char *cmd, const char *arg) {
 
 
 /* ===================================================================== */
-/* Datenverbindung (PASV)                                                */
+/* Data connection (PASV)                                                */
 /* ===================================================================== */
 
 int FtpClient::openDataConn(void **dataSockOut) {
@@ -326,15 +326,15 @@ int FtpClient::openDataConn(void **dataSockOut) {
     if (rc != FTP_OK) return rc;
     int code = readReply();
     if (code < 0) return code;
-    if (code != 227) { setErrorReply(L("PASV abgelehnt", "PASV refused")); return FTP_ERR_DATACONN; }
+    if (code != 227) { setErrorReply(L("PASV refused", "PASV abgelehnt")); return FTP_ERR_DATACONN; }
 
-    /* replyText: "...(h1,h2,h3,h4,p1,p2)" - erste Ziffer suchen. */
+    /* replyText: "...(h1,h2,h3,h4,p1,p2)" - look for the first digit. */
     const char *p = replyText;
     while (*p && !isdigit((unsigned char)*p)) p++;
 
     unsigned a0, a1, a2, a3, q1, q2;
     if (sscanf(p, "%u,%u,%u,%u,%u,%u", &a0, &a1, &a2, &a3, &q1, &q2) != 6) {
-        setError(L("PASV-Antwort nicht lesbar", "Cannot parse PASV reply"));
+        setError(L("Cannot parse PASV reply", "PASV-Antwort nicht lesbar"));
         return FTP_ERR_DATACONN;
     }
     pasvAddr[0] = (unsigned char)a0; pasvAddr[1] = (unsigned char)a1;
@@ -342,10 +342,10 @@ int FtpClient::openDataConn(void **dataSockOut) {
     pasvPort = ((q1 & 0xFF) << 8) + (q2 & 0xFF);
 
     TcpSocket *d = TcpSocketMgr::getSocket();
-    if (!d) { setError(L("Kein freier Socket f" ue "r Datenverbindung", "No free socket for data connection")); return FTP_ERR_DATACONN; }
+    if (!d) { setError(L("No free socket for data connection", "Kein freier Socket f" ue "r Datenverbindung")); return FTP_ERR_DATACONN; }
     if (d->setRecvBuffer(DATA_RECV_SIZE)) {
         TcpSocketMgr::freeSocket(d);
-        setError(L("Zu wenig Speicher f" ue "r Datenpuffer", "Not enough memory for data buffer"));
+        setError(L("Not enough memory for data buffer", "Zu wenig Speicher f" ue "r Datenpuffer"));
         return FTP_ERR_DATACONN;
     }
 
@@ -356,7 +356,7 @@ int FtpClient::openDataConn(void **dataSockOut) {
     if (d->connect(nextLocalPort(), addr, (uint16_t)pasvPort, CONNECT_TIMEOUT_MS) != 0) {
         d->close();
         TcpSocketMgr::freeSocket(d);
-        setError(L("Datenverbindung fehlgeschlagen", "Data connection failed"));
+        setError(L("Data connection failed", "Datenverbindung fehlgeschlagen"));
         return FTP_ERR_DATACONN;
     }
 
@@ -367,13 +367,13 @@ int FtpClient::openDataConn(void **dataSockOut) {
 void FtpClient::closeData(void *dataSock) {
     if (!dataSock) return;
     TcpSocket *d = (TcpSocket *)dataSock;
-    d->close();                       /* blockierend: leert Queue + FIN */
+    d->close();                       /* blocking: drains the queue + FIN */
     TcpSocketMgr::freeSocket(d);
 }
 
 
 /* ===================================================================== */
-/* Verbindung aufbauen / trennen                                         */
+/* Connect / disconnect                                                  */
 /* ===================================================================== */
 
 int FtpClient::connect(const char *host, unsigned port,
@@ -385,11 +385,11 @@ int FtpClient::connect(const char *host, unsigned port,
 
     state = FTP_CONNECTING;
 
-    /* --- Namensaufloesung (akzeptiert auch gepunktete IPs) --- */
+    /* --- Name resolution (also accepts dotted IPs) --- */
     IpAddr_t addr;
     int8_t drc = Dns::resolve(host, addr, 1);
     if (drc < 0) {
-        setError(L("Hostname zu lang oder ung" ue "ltig", "Host name too long or invalid"));
+        setError(L("Host name too long or invalid", "Hostname zu lang oder ung" ue "ltig"));
         state = FTP_DISCONNECTED; return FTP_ERR_DNS;
     }
     if (drc != 0) {
@@ -399,29 +399,29 @@ int FtpClient::connect(const char *host, unsigned port,
             Arp::driveArp();
             Dns::drivePendingQuery();
             if (elapsedMs(start) > DNS_TIMEOUT) {
-                setError(L("DNS-Zeit" ue "berschreitung", "DNS timeout"));
+                setError(L("DNS timeout", "DNS-Zeit" ue "berschreitung"));
                 state = FTP_DISCONNECTED; return FTP_ERR_DNS;
             }
         }
         drc = Dns::resolve(host, addr, 0);
         if (drc != 0) {
-            setError(L("Host nicht gefunden", "Host not found"));
+            setError(L("Host not found", "Host nicht gefunden"));
             state = FTP_DISCONNECTED; return FTP_ERR_DNS;
         }
     }
 
-    /* --- Steuersocket aufbauen --- */
+    /* --- Establish the control socket --- */
     TcpSocket *s = TcpSocketMgr::getSocket();
-    if (!s) { setError(L("Kein freier Socket", "No free socket")); state = FTP_DISCONNECTED; return FTP_ERR_CONNECT; }
+    if (!s) { setError(L("No free socket", "Kein freier Socket")); state = FTP_DISCONNECTED; return FTP_ERR_CONNECT; }
     if (s->setRecvBuffer(CONTROL_RECV_SIZE)) {
         TcpSocketMgr::freeSocket(s);
-        setError(L("Zu wenig Speicher", "Out of memory"));
+        setError(L("Out of memory", "Zu wenig Speicher"));
         state = FTP_DISCONNECTED; return FTP_ERR_CONNECT;
     }
     if (s->connect(nextLocalPort(), addr, (uint16_t)port, CONNECT_TIMEOUT_MS) != 0) {
         s->close();
         TcpSocketMgr::freeSocket(s);
-        setError(L("Verbindung zum Server fehlgeschlagen", "Connection to server failed"));
+        setError(L("Connection to server failed", "Verbindung zum Server fehlgeschlagen"));
         state = FTP_DISCONNECTED; return FTP_ERR_CONNECT;
     }
     ctrl = s;
@@ -430,15 +430,15 @@ int FtpClient::connect(const char *host, unsigned port,
     state = FTP_BANNER;
     int code = readReply();
     if (code < 0) { disconnect(); return code; }
-    if (code != 220) { setErrorReply(L("Server-Banner unerwartet", "Unexpected server banner")); disconnect(); return FTP_ERR_PROTO; }
+    if (code != 220) { setErrorReply(L("Unexpected server banner", "Server-Banner unerwartet")); disconnect(); return FTP_ERR_PROTO; }
 
     /* --- USER --- */
     state = FTP_AUTH_USER;
     if (sendCmdArg("USER", (user && user[0]) ? user : "anonymous") != FTP_OK) { disconnect(); return FTP_ERR_PROTO; }
     code = readReply();
     if (code < 0) { disconnect(); return code; }
-    if (code == 230) { state = FTP_IDLE; return FTP_OK; }     /* ohne Passwort drin */
-    if (code != 331) { setErrorReply(L("Benutzer abgelehnt", "User rejected")); disconnect(); return FTP_ERR_AUTH; }
+    if (code == 230) { state = FTP_IDLE; return FTP_OK; }     /* logged in without a password */
+    if (code != 331) { setErrorReply(L("User rejected", "Benutzer abgelehnt")); disconnect(); return FTP_ERR_AUTH; }
 
     /* --- PASS --- */
     state = FTP_AUTH_PASS;
@@ -446,9 +446,9 @@ int FtpClient::connect(const char *host, unsigned port,
     code = readReply();
     if (code < 0) { disconnect(); return code; }
     if (code == 230 || code == 202) { state = FTP_IDLE; return FTP_OK; }
-    if (code == 332) { setError(L("Server verlangt ACCT (nicht unterst" ue "tzt)", "Server requires ACCT (unsupported)")); disconnect(); return FTP_ERR_AUTH; }
+    if (code == 332) { setError(L("Server requires ACCT (unsupported)", "Server verlangt ACCT (nicht unterst" ue "tzt)")); disconnect(); return FTP_ERR_AUTH; }
 
-    setErrorReply(L("Login fehlgeschlagen", "Login failed"));
+    setErrorReply(L("Login failed", "Login fehlgeschlagen"));
     disconnect();
     return FTP_ERR_AUTH;
 }
@@ -458,7 +458,7 @@ void FtpClient::disconnect(void) {
         TcpSocket *s = (TcpSocket *)ctrl;
         state = FTP_DISCONNECTING;
 
-        /* QUIT senden (best effort), Antwort kurz abwarten. */
+        /* Send QUIT (best effort), briefly wait for a reply. */
         sendCmd("QUIT");
         clockTicks_t start = TIMER_GET_CURRENT();
         while (elapsedMs(start) < 1000ul) {
@@ -478,15 +478,15 @@ void FtpClient::disconnect(void) {
 
 
 /* ===================================================================== */
-/* Keepalive / Leerlauf                                                  */
+/* Keepalive / idle                                                      */
 /* ===================================================================== */
 
 int FtpClient::noop(void) {
     if (!is_connected()) return FTP_ERR_GENERAL;
     if (sendCmd("NOOP") != FTP_OK) { disconnect(); return FTP_ERR_PROTO; }
     int code = readReply();
-    if (code < 0) { disconnect(); return code; }   /* Verbindung verloren */
-    return FTP_OK;                                  /* 200 erwartet, sonst egal */
+    if (code < 0) { disconnect(); return code; }   /* connection lost */
+    return FTP_OK;                                  /* 200 expected, otherwise doesn't matter */
 }
 
 int FtpClient::idle_drive(void) {
@@ -501,11 +501,11 @@ int FtpClient::idle_drive(void) {
 }
 
 /* ===================================================================== */
-/* Verzeichnisliste                                                      */
+/* Directory listing                                                     */
 /* ===================================================================== */
 
 int FtpClient::list(const char *path, FtpLineCb cb, void *ctx) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
 
     void *d = 0;
     state = FTP_LISTING;
@@ -515,16 +515,16 @@ int FtpClient::list(const char *path, FtpLineCb cb, void *ctx) {
     rc = (path && path[0]) ? sendCmdArg("LIST", path) : sendCmd("LIST");
     if (rc != FTP_OK) { closeData(d); state = FTP_IDLE; return rc; }
 
-    int code = readReply();                 /* 150 / 125 erwartet */
+    int code = readReply();                 /* 150 / 125 expected */
     if (code < 0) { closeData(d); state = FTP_IDLE; return code; }
     if (code != 150 && code != 125) {
         closeData(d); state = FTP_IDLE;
-        if (code == 226 || code == 250) return FTP_OK;   /* leeres Listing */
-        setErrorReply(L("LIST abgelehnt", "LIST refused"));
+        if (code == 226 || code == 250) return FTP_OK;   /* empty listing */
+        setErrorReply(L("LIST refused", "LIST abgelehnt"));
         return (code >= 400) ? FTP_ERR_SERVER : FTP_ERR_PROTO;
     }
 
-    /* --- Datenverbindung zeilenweise lesen --- */
+    /* --- Read the data connection line by line --- */
     TcpSocket *ds = (TcpSocket *)d;
     char line[FTP_LINE_MAX];
     int  len = 0;
@@ -551,17 +551,17 @@ int FtpClient::list(const char *path, FtpLineCb cb, void *ctx) {
             if (ds->isRemoteClosed() && !ds->recvDataWaiting()) break;
             if (elapsedMs(start) > DATA_TIMEOUT_MS) break;
         } else {
-            break;                          /* Socket geschlossen */
+            break;                          /* socket closed */
         }
     }
-    if (len > 0) { line[len] = 0; if (cb) cb(ctx, line); }   /* letzte Zeile ohne LF */
+    if (len > 0) { line[len] = 0; if (cb) cb(ctx, line); }   /* last line without LF */
 
     closeData(d);
 
-    code = readReply();                     /* Abschluss 226 */
+    code = readReply();                     /* completion 226 */
     state = FTP_IDLE;
     if (code < 0) return code;
-    if (code >= 400) { setErrorReply(L("LIST unvollst" ae "ndig", "LIST incomplete")); return FTP_ERR_SERVER; }
+    if (code >= 400) { setErrorReply(L("LIST incomplete", "LIST unvollst" ae "ndig")); return FTP_ERR_SERVER; }
     return FTP_OK;
 }
 
@@ -571,30 +571,30 @@ int FtpClient::list(const char *path, FtpLineCb cb, void *ctx) {
 /* ===================================================================== */
 
 int FtpClient::change_dir(const char *path) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     int rc = simpleCmd("CWD", path);
-    if (rc == FTP_ERR_SERVER) setErrorReply(L("Verzeichniswechsel fehlgeschlagen", "Directory change failed"));
+    if (rc == FTP_ERR_SERVER) setErrorReply(L("Directory change failed", "Verzeichniswechsel fehlgeschlagen"));
     return rc;
 }
 
 int FtpClient::parent_dir(void) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     int rc = simpleCmd("CDUP", 0);
-    if (rc == FTP_ERR_SERVER) setErrorReply(L("CDUP fehlgeschlagen", "CDUP failed"));
+    if (rc == FTP_ERR_SERVER) setErrorReply(L("CDUP failed", "CDUP fehlgeschlagen"));
     return rc;
 }
 
 int FtpClient::get_cwd(char *buf, int buflen) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     if (buflen > 0) buf[0] = 0;
 
     int rc = sendCmd("PWD");
     if (rc != FTP_OK) return rc;
     int code = readReply();
     if (code < 0) return code;
-    if (code != 257) { setErrorReply(L("PWD fehlgeschlagen", "PWD failed")); return FTP_ERR_SERVER; }
+    if (code != 257) { setErrorReply(L("PWD failed", "PWD fehlgeschlagen")); return FTP_ERR_SERVER; }
 
-    /* 257-Format: "/pfad" optionaler Kommentar; "" -> " escaped. */
+    /* 257 format: "/path" optional comment; "" -> " escaped. */
     const char *q = strchr(replyText, '"');
     if (q) {
         q++;
@@ -616,18 +616,18 @@ int FtpClient::get_cwd(char *buf, int buflen) {
 
 
 /* ===================================================================== */
-/* Download (RETR) / Upload (STOR) - immer Binaer (TYPE I)               */
+/* Download (RETR) / Upload (STOR) - always binary (TYPE I)              */
 /* ===================================================================== */
 
 int FtpClient::retr(const char *remote, const char *localpath,
                     FtpProgressCb cb, void *ctx) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
 
     int rc = simpleCmd("TYPE", "I");
-    if (rc != FTP_OK) { if (rc == FTP_ERR_SERVER) setError(L("TYPE I abgelehnt", "TYPE I refused")); return rc; }
+    if (rc != FTP_OK) { if (rc == FTP_ERR_SERVER) setError(L("TYPE I refused", "TYPE I abgelehnt")); return rc; }
 
-    /* SIZE: Dateigroesse abfragen fuer Fortschrittsbalken (RFC 3659).
-     * Nicht alle Server unterstuetzen SIZE; Fehler werden ignoriert. */
+    /* SIZE: query the file size for the progress bar (RFC 3659).
+     * Not all servers support SIZE; errors are ignored. */
     unsigned long filesize = 0;
     if (sendCmdArg("SIZE", remote) == FTP_OK) {
         int sc = readReply();
@@ -641,7 +641,7 @@ int FtpClient::retr(const char *remote, const char *localpath,
     if (rc != FTP_OK) { state = FTP_IDLE; return rc; }
 
     FILE *f = fopen(localpath, "wb");
-    if (!f) { closeData(d); state = FTP_IDLE; setError(L("Lokale Datei nicht anlegbar", "Cannot create local file")); return FTP_ERR_LOCALIO; }
+    if (!f) { closeData(d); state = FTP_IDLE; setError(L("Cannot create local file", "Lokale Datei nicht anlegbar")); return FTP_ERR_LOCALIO; }
 
     TcpSocket *ds = (TcpSocket *)d;
     unsigned long total = 0;
@@ -652,9 +652,10 @@ int FtpClient::retr(const char *remote, const char *localpath,
     rc = sendCmdArg("RETR", remote);
     if (rc != FTP_OK) { fclose(f); remove(localpath); closeData(d); state = FTP_IDLE; return rc; }
 
-    /* "150/125" lesen UND dabei die Datenverbindung schon leeren: sonst fuellt
-     * der Server den Empfangspuffer waehrend dieses Wartens, das Fenster faellt
-     * unter eine MSS und es kommt zum einmaligen SWS-Stillstand am Start. */
+    /* Read "150/125" WHILE already draining the data connection: otherwise
+     * the server fills the receive buffer during this wait, the window
+     * drops below one MSS, and we get a one-time SWS stall right at the
+     * start. */
     {
         DrainCtx dc;
         dc.ds = ds; dc.f = f; dc.buf = buf; dc.sz = (int)sizeof(buf);
@@ -664,7 +665,7 @@ int FtpClient::retr(const char *remote, const char *localpath,
         if (code < 0) { fclose(f); remove(localpath); closeData(d); state = FTP_IDLE; return code; }
         if (code != 150 && code != 125) {
             fclose(f); remove(localpath); closeData(d); state = FTP_IDLE;
-            setErrorReply(L("RETR abgelehnt", "RETR refused"));
+            setErrorReply(L("RETR refused", "RETR abgelehnt"));
             return (code >= 400) ? FTP_ERR_SERVER : FTP_ERR_PROTO;
         }
     }
@@ -674,8 +675,8 @@ int FtpClient::retr(const char *remote, const char *localpath,
     while (!ioerr) {
         int dr;
         driveStack();
-        /* Puffer pro Durchlauf komplett leeren: haelt das TCP-Fenster offen,
-         * damit der Server nicht durch Silly Window Syndrome stoppt. */
+        /* Drain the buffer completely on every pass: keeps the TCP window
+         * open so the server doesn't stall due to Silly Window Syndrome. */
         dr = drainToFile(ds, f, buf, (int)sizeof(buf), &total);
         if (dr == -1) { ioerr = 1; break; }
         if (dr > 0) {
@@ -690,24 +691,24 @@ int FtpClient::retr(const char *remote, const char *localpath,
     fclose(f);
     closeData(d);
 
-    if (ioerr == 1) { remove(localpath); setError(L("Schreibfehler (Platte voll?)", "Write error (disk full?)")); state = FTP_IDLE; return FTP_ERR_LOCALIO; }
-    if (ioerr == 2) { setError(L("Zeit" ue "berschreitung beim Download", "Download timeout")); state = FTP_IDLE; return FTP_ERR_TIMEOUT; }
+    if (ioerr == 1) { remove(localpath); setError(L("Write error (disk full?)", "Schreibfehler (Platte voll?)")); state = FTP_IDLE; return FTP_ERR_LOCALIO; }
+    if (ioerr == 2) { setError(L("Download timeout", "Zeit" ue "berschreitung beim Download")); state = FTP_IDLE; return FTP_ERR_TIMEOUT; }
 
     code = readReply();                     /* 226 */
     state = FTP_IDLE;
     if (code < 0) return code;
-    if (code >= 400) { setErrorReply(L("Download unvollst" ae "ndig", "Download incomplete")); return FTP_ERR_SERVER; }
+    if (code >= 400) { setErrorReply(L("Download incomplete", "Download unvollst" ae "ndig")); return FTP_ERR_SERVER; }
     return FTP_OK;
 }
 
 int FtpClient::stor(const char *localpath, const char *remote,
                     FtpProgressCb cb, void *ctx) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
 
     FILE *f = fopen(localpath, "rb");
-    if (!f) { setError(L("Lokale Datei nicht lesbar", "Cannot read local file")); return FTP_ERR_LOCALIO; }
+    if (!f) { setError(L("Cannot read local file", "Lokale Datei nicht lesbar")); return FTP_ERR_LOCALIO; }
 
-    unsigned long fsize = 0;                /* fuer Fortschritt */
+    unsigned long fsize = 0;                /* for progress reporting */
     if (fseek(f, 0L, SEEK_END) == 0) {
         long t = ftell(f);
         if (t > 0) fsize = (unsigned long)t;
@@ -715,7 +716,7 @@ int FtpClient::stor(const char *localpath, const char *remote,
     }
 
     int rc = simpleCmd("TYPE", "I");
-    if (rc != FTP_OK) { fclose(f); if (rc == FTP_ERR_SERVER) setError(L("TYPE I abgelehnt", "TYPE I refused")); return rc; }
+    if (rc != FTP_OK) { fclose(f); if (rc == FTP_ERR_SERVER) setError(L("TYPE I refused", "TYPE I abgelehnt")); return rc; }
 
     void *d = 0;
     state = FTP_TRANSFERRING;
@@ -729,7 +730,7 @@ int FtpClient::stor(const char *localpath, const char *remote,
     if (code < 0) { fclose(f); closeData(d); state = FTP_IDLE; return code; }
     if (code != 150 && code != 125) {
         fclose(f); closeData(d); state = FTP_IDLE;
-        setErrorReply(L("STOR abgelehnt", "STOR refused"));
+        setErrorReply(L("STOR refused", "STOR abgelehnt"));
         return (code >= 400) ? FTP_ERR_SERVER : FTP_ERR_PROTO;
     }
 
@@ -761,28 +762,28 @@ int FtpClient::stor(const char *localpath, const char *remote,
     if (!ioerr && ferror(f)) ioerr = 1;
 
     fclose(f);
-    closeData(d);                           /* blockierend: alle Daten + FIN raus */
+    closeData(d);                           /* blocking: flushes all data + FIN */
 
-    if (ioerr == 1) { setError(L("Lokaler Lesefehler", "Local read error")); state = FTP_IDLE; return FTP_ERR_LOCALIO; }
-    if (ioerr == 2) { setError(L("Zeit" ue "berschreitung beim Upload", "Upload timeout")); state = FTP_IDLE; return FTP_ERR_TIMEOUT; }
-    if (ioerr == 3) { setError(L("Datenverbindung verloren", "Data connection lost")); state = FTP_IDLE; return FTP_ERR_DATACONN; }
+    if (ioerr == 1) { setError(L("Local read error", "Lokaler Lesefehler")); state = FTP_IDLE; return FTP_ERR_LOCALIO; }
+    if (ioerr == 2) { setError(L("Upload timeout", "Zeit" ue "berschreitung beim Upload")); state = FTP_IDLE; return FTP_ERR_TIMEOUT; }
+    if (ioerr == 3) { setError(L("Data connection lost", "Datenverbindung verloren")); state = FTP_IDLE; return FTP_ERR_DATACONN; }
 
     code = readReply();                     /* 226 */
     state = FTP_IDLE;
     if (code < 0) return code;
-    if (code >= 400) { setErrorReply(L("Upload unvollst" ae "ndig", "Upload incomplete")); return FTP_ERR_SERVER; }
+    if (code >= 400) { setErrorReply(L("Upload incomplete", "Upload unvollst" ae "ndig")); return FTP_ERR_SERVER; }
     return FTP_OK;
 }
 
 
 /* ===================================================================== */
-/* Server-Dateioperationen                                               */
+/* Server file operations                                                */
 /* ===================================================================== */
 
 int FtpClient::remote_file_exists(const char *path) {
     if (!is_connected()) return 0;
-    /* TYPE I, damit SIZE auch bei Servern funktioniert, die es im ASCII-Modus
-     * ablehnen. Fehler hier ignorieren. */
+    /* TYPE I, so SIZE also works on servers that refuse it in ASCII mode.
+     * Errors here are ignored. */
     simpleCmd("TYPE", "I");
     if (sendCmdArg("SIZE", path) != FTP_OK) return 0;
     int code = readReply();
@@ -790,34 +791,34 @@ int FtpClient::remote_file_exists(const char *path) {
 }
 
 int FtpClient::make_dir(const char *path) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     int rc = simpleCmd("MKD", path);        /* 257 */
-    if (rc == FTP_ERR_SERVER) setErrorReply(L("Verzeichnis anlegen fehlgeschlagen", "Make directory failed"));
+    if (rc == FTP_ERR_SERVER) setErrorReply(L("Make directory failed", "Verzeichnis anlegen fehlgeschlagen"));
     return rc;
 }
 
 int FtpClient::remove_dir(const char *path) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     int rc = simpleCmd("RMD", path);        /* 250 */
-    if (rc == FTP_ERR_SERVER) setErrorReply(L("Verzeichnis l" oe "schen fehlgeschlagen", "Remove directory failed"));
+    if (rc == FTP_ERR_SERVER) setErrorReply(L("Remove directory failed", "Verzeichnis l" oe "schen fehlgeschlagen"));
     return rc;
 }
 
 int FtpClient::remove_file(const char *path) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
     int rc = simpleCmd("DELE", path);       /* 250 */
-    if (rc == FTP_ERR_SERVER) setErrorReply(L("L" oe "schen fehlgeschlagen", "Delete failed"));
+    if (rc == FTP_ERR_SERVER) setErrorReply(L("Delete failed", "L" oe "schen fehlgeschlagen"));
     return rc;
 }
 
 int FtpClient::rename(const char *from, const char *to) {
-    if (!is_connected()) { setError(L("Nicht verbunden", "Not connected")); return FTP_ERR_GENERAL; }
+    if (!is_connected()) { setError(L("Not connected", "Nicht verbunden")); return FTP_ERR_GENERAL; }
 
     int rc = sendCmdArg("RNFR", from);
     if (rc != FTP_OK) return rc;
     int code = readReply();
     if (code < 0) return code;
-    if (code != 350) { setErrorReply(L("RNFR fehlgeschlagen", "RNFR failed")); return FTP_ERR_SERVER; }
+    if (code != 350) { setErrorReply(L("RNFR failed", "RNFR fehlgeschlagen")); return FTP_ERR_SERVER; }
 
     rc = sendCmdArg("RNTO", to);
     if (rc != FTP_OK) return rc;
@@ -825,6 +826,6 @@ int FtpClient::rename(const char *from, const char *to) {
     if (code < 0) return code;
     if (code >= 200 && code < 300) return FTP_OK;
 
-    setErrorReply(L("Umbenennen fehlgeschlagen", "Rename failed"));
+    setErrorReply(L("Rename failed", "Umbenennen fehlgeschlagen"));
     return FTP_ERR_SERVER;
 }

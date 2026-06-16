@@ -1,15 +1,16 @@
 /* =============================================================================
- * viewer.h - Einfacher Vollbild-Textbetrachter (F3)
+ * viewer.h - Simple full-screen text viewer (F3)
  * -----------------------------------------------------------------------------
- * Zeigt eine Datei (bis ca. 60 KB) scrollbar an. Steuerung: Pfeile, Bild auf/ab,
- * Pos1/Ende, Links/Rechts (horizontal), Esc/Q beendet. Groessere Dateien werden
- * abgeschnitten ([gekuerzt]-Hinweis). Steuerzeichen werden als '.' dargestellt.
+ * Displays a file (up to ~60 KB) with scrolling. Controls: arrows, Page Up/
+ * Down, Home/End, Left/Right (horizontal), Esc/Q quits. Larger files are
+ * truncated (a "[truncated]" note is shown). Control characters are shown
+ * as '.'.
  * ===========================================================================*/
 #ifndef VIEWER_H
 #define VIEWER_H
 
-/* path  = vollstaendiger Pfad der (lokalen) Datei.
- * title = Anzeigename in der Kopfzeile (z.B. der reine Dateiname). */
+/* path  = full path of the (local) file.
+ * title = display name in the header line (e.g. just the file name). */
 void view_file(const char *path, const char *title);
 
 #endif /* VIEWER_H */

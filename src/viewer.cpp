@@ -1,10 +1,10 @@
 /* =============================================================================
- * viewer.cpp - Vollbild-Textbetrachter (F3)
+ * viewer.cpp - Full-screen text viewer (F3)
  * -----------------------------------------------------------------------------
- * Liest bis VIEW_BUF_MAX Bytes der Datei in den FAR-Heap, baut einen
- * Zeilenindex auf und zeigt die Datei scrollbar an. Bewusst speicherbegrenzt:
- * eine einzelne malloc-Anforderung (<64 KB im Large Model = FAR-Heap) plus
- * ein Offset-Array. Kein Laden der gesamten Datei.
+ * Reads up to VIEW_BUF_MAX bytes of the file into the far heap, builds a
+ * line index, and displays the file with scrolling. Deliberately memory-
+ * limited: a single malloc request (<64 KB in the large model = far heap)
+ * plus an offset array. Does not load the entire file.
  *
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  * ===========================================================================*/
@@ -16,24 +16,24 @@
 #include "keymap.h"
 #include "dialog.h"
 #include "i18n.h"
-#include "umlaut.h"   /* immer als letzter Include */
+#include "umlaut.h"   /* always the last include */
 
-#define VIEW_BUF_MAX    32000u   /* max. eingelesene Bytes (schont knappen RAM) */
-#define VIEW_MAX_LINES   4000    /* max. indizierte Zeilen                     */
+#define VIEW_BUF_MAX    32000u   /* max. bytes read in (spares scarce RAM) */
+#define VIEW_MAX_LINES   4000    /* max. indexed lines                     */
 
 void view_file(const char *path, const char *title)
 {
     FILE          *f;
     char      far *buf;
-    unsigned  far *lstart;       /* Offset jedes Zeilenanfangs in buf */
+    unsigned  far *lstart;       /* offset of each line start in buf */
     long           nlines = 0;
     int            truncated = 0;
     size_t         n;
 
     f = fopen(path, "rb");
     if (!f) {
-        dlg_error(L("Anzeigen", "View"),
-                  L("Datei nicht lesbar.", "Cannot open file."));
+        dlg_error(L("View", "Anzeigen"),
+                  L("Cannot open file.", "Datei nicht lesbar."));
         return;
     }
 
@@ -43,8 +43,8 @@ void view_file(const char *path, const char *title)
         if (buf)    free(buf);
         if (lstart) free(lstart);
         fclose(f);
-        dlg_error(L("Anzeigen", "View"),
-                  L("Zu wenig Speicher.", "Out of memory."));
+        dlg_error(L("View", "Anzeigen"),
+                  L("Out of memory.", "Zu wenig Speicher."));
         return;
     }
 
@@ -52,7 +52,7 @@ void view_file(const char *path, const char *title)
     if (n == VIEW_BUF_MAX - 1 && fgetc(f) != EOF) truncated = 1;
     fclose(f);
 
-    /* --- Zeilenindex aufbauen (Zeilenanfaenge merken) --- */
+    /* --- Build the line index (remember the start of each line) --- */
     {
         unsigned pos = 0;
         lstart[nlines++] = 0;
@@ -64,9 +64,9 @@ void view_file(const char *path, const char *title)
         if (nlines >= VIEW_MAX_LINES) truncated = 1;
     }
 
-    /* --- Anzeige-Schleife --- */
+    /* --- Display loop --- */
     {
-        int  content_rows = SCREEN_ROWS - 2;   /* Kopf (0) + Inhalt + Fuss (24) */
+        int  content_rows = SCREEN_ROWS - 2;   /* header (0) + content + footer (24) */
         long top  = 0;
         int  hoff = 0;
         int  running = 1;
@@ -79,18 +79,18 @@ void view_file(const char *path, const char *title)
             int  r, k;
             long maxtop;
 
-            /* Kopfzeile (Dateiname + Zeilenposition). */
+            /* Header line (file name + line position). */
             lastvis = top + content_rows;
             if (lastvis > nlines) lastvis = nlines;
             sprintf(head, " %.38s   %s %ld-%ld/%ld%s",
                     title ? title : "",
-                    L("Zeile", "Line"),
+                    L("Line", "Zeile"),
                     top + 1, lastvis, nlines,
-                    truncated ? L("  [gek" ue "rzt]", "  [truncated]") : "");
+                    truncated ? L("  [truncated]", "  [gek" ue "rzt]") : "");
             fill_rect(0, 0, 1, SCREEN_COLS, ' ', ATTR_MENUBAR);
             draw_text(0, 0, head, ATTR_MENUBAR, SCREEN_COLS);
 
-            /* Inhaltszeilen. */
+            /* Content lines. */
             for (r = 0; r < content_rows; r++) {
                 int  row = 1 + r;
                 long li  = top + r;
@@ -119,14 +119,14 @@ void view_file(const char *path, const char *title)
                 }
             }
 
-            /* Fusszeile (Tastenhinweis). */
+            /* Footer line (key hint). */
             sprintf(foot, " %s",
-                    L("Pfeile/Bild scrollen   <-/-> seitlich   Esc Ende",
-                      "Arrows/PgUp-Dn scroll   <-/-> sideways   Esc Quit"));
+                    L("Arrows/PgUp-Dn scroll   <-/-> sideways   Esc Quit",
+                      "Pfeile/Bild scrollen   <-/-> seitlich   Esc Ende"));
             fill_rect(SCREEN_ROWS - 1, 0, 1, SCREEN_COLS, ' ', ATTR_MENUBAR);
             draw_text(SCREEN_ROWS - 1, 0, foot, ATTR_MENUBAR, SCREEN_COLS);
 
-            /* Eingabe. */
+            /* Input. */
             maxtop = nlines - content_rows;
             if (maxtop < 0) maxtop = 0;
             k = readkey();

@@ -1,67 +1,67 @@
 /* =============================================================================
- * dialog.h - Modale Dialoge fuer NCFTP386
+ * dialog.h - Modal dialogs for NCFTP386
  * -----------------------------------------------------------------------------
- * Jeder Dialog zeichnet sich zentriert ueber den aktuellen Bildschirm, faehrt
- * seine eigene Tastaturschleife und stellt den Bildschirm beim Schliessen
- * wieder her - der Aufrufer muss NICHT neu zeichnen.
+ * Every dialog draws itself centered over the current screen, runs its own
+ * keyboard loop, and restores the screen when it closes - the caller does
+ * NOT need to redraw.
  *
- * Mehrzeilige Nachrichten: Zeilen mit '\n' trennen (max. DLG_MAX_LINES).
+ * Multi-line messages: separate lines with '\n' (max. DLG_MAX_LINES).
  * ===========================================================================*/
 #ifndef DIALOG_H
 #define DIALOG_H
 
-#define DLG_MAX_LINES 8     /* max. Textzeilen in Message-/Confirm-Dialogen */
+#define DLG_MAX_LINES 8     /* max. text lines in message/confirm dialogs */
 
-/* Hinweis-/Fehlerbox mit einem [ OK ]-Knopf. is_error!=0 -> rote Darstellung.
- * Schliesst bei Enter, Esc oder Leertaste. */
+/* Notice/error box with one [ OK ] button. is_error!=0 -> red styling.
+ * Closes on Enter, Esc, or Space. */
 void dlg_message(const char *title, const char *msg, int is_error);
 void dlg_error(const char *title, const char *msg);   /* = dlg_message(...,1)  */
 
-/* Ja/Nein-Abfrage. Rueckgabe: 1 = Ja, 0 = Nein.
- * J/N als Direkttasten, Links/Rechts/Tab wechselt, Enter waehlt, Esc = Nein.
- * Vorgabe-Fokus liegt auf "Nein". */
+/* Yes/No prompt. Returns: 1 = Yes, 0 = No.
+ * Y/N as direct keys, Left/Right/Tab switches focus, Enter selects, Esc = No.
+ * Default focus is on "No". */
 int dlg_confirm(const char *title, const char *msg);
 
-/* Einzeiliges Eingabefeld (Basis fuer den Verbindungsdialog).
- * buf wird vorbefuellt angezeigt und editiert; maxlen = max. Zeichen (buf muss
- * maxlen+1 gross sein). is_password!=0 zeigt '*'. Rueckgabe: 1 = OK, 0 = Abbruch. */
+/* Single-line input field (basis for the connect dialog).
+ * buf is shown pre-filled and edited; maxlen = max. characters (buf must be
+ * maxlen+1 in size). is_password!=0 shows '*'. Returns: 1 = OK, 0 = Cancel. */
 int dlg_input(const char *title, const char *prompt,
               char *buf, int maxlen, int is_password);
 
-/* Nicht-modaler Fortschrittsdialog fuer Datentransfers (F5).
- * Ablauf: begin() oeffnet die Box (sichert den Bildschirm), update() wird
- * waehrend des blockierenden Transfers aus dem FtpProgressCb aufgerufen,
- * end() schliesst die Box und stellt den Bildschirm wieder her.
- *   total >  0 : Fortschrittsbalken mit Prozentanzeige
- *   total == 0 : Groesse unbekannt -> nur uebertragene Bytes
- * update() zeichnet aus Effizienzgruenden nur bei sichtbarer Aenderung neu. */
+/* Non-modal progress dialog for data transfers (F5).
+ * Flow: begin() opens the box (saves the screen), update() is called from
+ * the FtpProgressCb during the blocking transfer, end() closes the box and
+ * restores the screen.
+ *   total >  0 : progress bar with percentage
+ *   total == 0 : size unknown -> just the bytes transferred
+ * update() only redraws on a visible change, for efficiency. */
 void dlg_progress_begin(const char *title, const char *fromname);
 void dlg_progress_update(unsigned long sofar, unsigned long total);
 void dlg_progress_end(void);
 
-/* Den angezeigten Dateinamen waehrend eines laufenden Fortschrittsdialogs
- * wechseln (fuer Stapel-/rekursive Kopiervorgaenge). Setzt den Balken auf 0%
- * zurueck. Wirkungslos, wenn kein Fortschrittsdialog offen ist. */
+/* Change the displayed file name while a progress dialog is running (for
+ * batch/recursive copy operations). Resets the bar to 0%. No effect if no
+ * progress dialog is open. */
 void dlg_progress_setfile(const char *name);
 
-/* Vertikales Auswahlmenue (modal). Zeigt 'count' Eintraege, anfangs ist
- * 'initial' hervorgehoben. Pfeile/Pos1/Ende bewegen, Enter waehlt, Esc bricht
- * ab; ein Buchstabe springt direkt zum ersten Eintrag mit diesem Anfangs-
- * zeichen und waehlt ihn. Rueckgabe: gewaehlter Index 0..count-1 oder -1. */
+/* Vertical selection menu (modal). Shows 'count' entries, 'initial' is
+ * highlighted at first. Arrows/Home/End move, Enter selects, Esc cancels;
+ * a letter key jumps straight to the first entry starting with that
+ * character and selects it. Returns: selected index 0..count-1, or -1. */
 int dlg_menu(const char *title, const char *const *items, int count, int initial);
 
-/* Auswahldialog: mehrzeilige Nachricht 'msg' oben, darunter eine vertikale
- * Liste von 'count' Optionen. Pfeile bewegen, Enter waehlt, Esc bricht ab.
- * Rueckgabe: gewaehlter Optionsindex 0..count-1, oder -1 bei Esc. */
+/* Choice dialog: multi-line message 'msg' on top, below it a vertical list
+ * of 'count' options. Arrows move, Enter selects, Esc cancels.
+ * Returns: selected option index 0..count-1, or -1 on Esc. */
 int dlg_choice(const char *title, const char *msg,
                const char *const *items, int count);
 
-/* FTP-Verbindungsformular in einem einzigen Dialog:
- * Host/Port/User/Pass-Felder + zwei Speicher-Ankreuzfelder.
- * Tab/Down/Up navigieren zwischen Feldern; Space/Enter toggelt Checkboxen.
- * *save_conn und *save_pass werden in/out verwendet (Vorbelegung aus NCFTP.SAV).
- * Rueckgabe: 1 = Verbinden, 0 = Abbrechen. Bei 0 bleiben *save_conn/*save_pass
- * unveraendert. */
+/* FTP connect form in a single dialog:
+ * Host/Port/User/Pass fields + two "save" checkboxes.
+ * Tab/Down/Up navigate between fields; Space/Enter toggles checkboxes.
+ * *save_conn and *save_pass are used in/out (pre-filled from NCFTP.SAV).
+ * Returns: 1 = Connect, 0 = Cancel. On 0, *save_conn/*save_pass are left
+ * unchanged. */
 int dlg_connect(const char *title,
                 char *host, int host_max,
                 char *port, int port_max,
@@ -70,8 +70,8 @@ int dlg_connect(const char *title,
                 int *save_conn,
                 int *save_pass);
 
-/* Splash-Screen beim Programmstart: zentrierte Box mit Versionsinfo.
- * Verschwindet nach ~2 Sekunden oder bei Tastendruck. */
+/* Splash screen at program start: centered box with version info.
+ * Disappears after ~2 seconds or on a key press. */
 void dlg_splash(const char *version);
 
 #endif /* DIALOG_H */

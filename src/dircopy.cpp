@@ -1,19 +1,18 @@
 /* =============================================================================
- * dircopy.cpp - Rekursives Kopieren ganzer Verzeichnisbaeume
+ * dircopy.cpp - Recursive copying of entire directory trees
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  *
- * Speicher-/Tiefen-Hinweise:
- *  - Upload nutzt _dos_findfirst/_dos_findnext im Streaming: jede Rekursions-
- *    ebene hat ihren eigenen find_t (Watcom setzt vor jedem findnext die DTA
- *    neu), daher ist verschachtelte Iteration zulaessig - kein Zwischenpuffer.
- *  - Download muss eine Verzeichnisebene komplett einlesen (die Datenverbindung
- *    der LIST muss geschlossen sein, bevor RETR/LIST des naechsten Eintrags
- *    laufen kann). Wir lesen daher in einen temporaeren Puffer, geben diesen
- *    aber VOR dem Absteigen in Unterverzeichnisse wieder frei (nur die kompakte
- *    Liste der Unterverzeichnis-Namen bleibt erhalten) -> geringer Spitzen-
- *    speicher auch bei tiefen Baeumen.
- *  - DC_MAXDEPTH bremst Endlos-Rekursion (z.B. durch zyklische Symlinks).
+ * Memory/depth notes:
+ *  - Upload uses _dos_findfirst/_dos_findnext in streaming fashion: each
+ *    recursion level has its own find_t (Watcom resets the DTA before every
+ *    findnext), so nested iteration is allowed - no intermediate buffer.
+ *  - Download must read in an entire directory level completely (the LIST's
+ *    data connection must be closed before the next entry's RETR/LIST can
+ *    run). We therefore read into a temporary buffer, but free it BEFORE
+ *    descending into subdirectories (only the compact list of subdirectory
+ *    names is kept) -> low peak memory even for deep trees.
+ *  - DC_MAXDEPTH limits infinite recursion (e.g. from cyclic symlinks).
  * ===========================================================================*/
 #include <dos.h>      /* _dos_findfirst/_dos_findnext, _A_*, struct find_t */
 #include <direct.h>   /* _mkdir                                            */
@@ -27,13 +26,13 @@
 
 #define DC_MAXDEPTH    16
 #define DC_PATHMAX     260
-#define DC_LISTCAP     400     /* max. Eintraege je Remote-Verzeichnisebene */
+#define DC_LISTCAP     400     /* max. entries per remote directory level */
 
 /* ------------------------------------------------------------------ */
-/* Pfad-Helfer                                                         */
+/* Path helpers                                                        */
 /* ------------------------------------------------------------------ */
 
-/* "dir\name" (lokal, Backslash). Wurzel "C:\" beachten, laengensicher. */
+/* "dir\name" (local, backslash). Watch the "C:\" root, length-safe. */
 static void join_local(char *out, int outsz, const char *dir, const char *name)
 {
     int n;
@@ -48,7 +47,7 @@ static void join_local(char *out, int outsz, const char *dir, const char *name)
     strncat(out, name, outsz - 1 - (int)strlen(out));
 }
 
-/* "dir/name" (remote, Slash). Wurzel "/" beachten, laengensicher. */
+/* "dir/name" (remote, slash). Watch the "/" root, length-safe. */
 static void join_remote(char *out, int outsz, const char *dir, const char *name)
 {
     int n;
@@ -69,7 +68,7 @@ static int is_dot_dir(const char *name)
     return 0;
 }
 
-/* 1, falls die lokale Datei existiert (Ueberschreiben-Abfrage Download). */
+/* 1 if the local file exists (overwrite prompt for download). */
 static int local_exists(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -80,7 +79,7 @@ static int local_exists(const char *path)
 #define DC_AMASK (_A_SUBDIR | _A_HIDDEN | _A_SYSTEM | _A_RDONLY | _A_ARCH)
 
 /* ------------------------------------------------------------------ */
-/* Upload (lokal -> Remote), rekursiv                                  */
+/* Upload (local -> remote), recursive                                 */
 /* ------------------------------------------------------------------ */
 static int upload_recurse(FtpClient *ftp, const char *localDir,
                           const char *remoteDir, const char *leaf, int depth,
@@ -94,8 +93,8 @@ static int upload_recurse(FtpClient *ftp, const char *localDir,
 
     if (depth > DC_MAXDEPTH) return FTP_ERR_GENERAL;
 
-    /* Zielverzeichnis remote anlegen. Existiert es bereits, ignorieren wir
-     * den Fehler und kopieren in das vorhandene Verzeichnis hinein. */
+    /* Create the target directory remotely. If it already exists, we
+     * ignore the error and copy into the existing directory. */
     if (itemcb) itemcb(ctx, leaf, 1);
     ftp->make_dir(remoteDir);
 
@@ -138,10 +137,10 @@ int dircopy_upload(FtpClient *ftp, const char *localDir, const char *remoteName,
 }
 
 /* ------------------------------------------------------------------ */
-/* Download (Remote -> lokal), rekursiv                                */
+/* Download (remote -> local), recursive                               */
 /* ------------------------------------------------------------------ */
 
-/* Kompakter Eintrag fuer eine eingelesene Remote-Verzeichnisebene. */
+/* Compact entry for a fetched remote directory level. */
 struct DcEnt {
     char          name[PANEL_NAME_MAX];
     unsigned char is_dir;
@@ -176,8 +175,8 @@ static void dc_on_line(void *vctx, const char *line)
     c->count++;
 }
 
-/* Liste der Unterverzeichnis-Namen einer eingelesenen Ebene kompakt sichern.
- * Gibt die Anzahl zurueck (0 = keine / Speicherfehler) und legt *out an. */
+/* Save the list of subdirectory names of a fetched level compactly.
+ * Returns the count (0 = none / memory error) and sets up *out. */
 static int extract_subdirs(DcCollect *col, char (**out)[PANEL_NAME_MAX])
 {
     int i, nd = 0, j;
@@ -207,11 +206,11 @@ static int download_recurse(FtpClient *ftp, const char *remoteDir,
 
     if (depth > DC_MAXDEPTH) return FTP_ERR_GENERAL;
 
-    /* Lokales Zielverzeichnis anlegen (vorhandenes ignorieren). */
+    /* Create the local target directory (ignore if it already exists). */
     if (itemcb) itemcb(ctx, leaf, 1);
     _mkdir(localDir);
 
-    /* --- 1) gesamte Ebene einlesen --- */
+    /* --- 1) read in the entire level --- */
     col.cap     = DC_LISTCAP;
     col.count   = 0;
     col.curYear = dc_current_year();
@@ -221,7 +220,7 @@ static int download_recurse(FtpClient *ftp, const char *remoteDir,
     result = ftp->list(remoteDir, dc_on_line, &col);
     if (result != FTP_OK) { free(col.arr); return result; }
 
-    /* --- 2) zuerst alle Dateien holen (keine Rekursion, kein Mehrspeicher) --- */
+    /* --- 2) fetch all files first (no recursion, no extra memory) --- */
     for (i = 0; i < col.count; i++) {
         char childR[DC_PATHMAX], childL[DC_PATHMAX];
         if (col.arr[i].is_dir) continue;
@@ -238,11 +237,11 @@ static int download_recurse(FtpClient *ftp, const char *remoteDir,
         if (result != FTP_OK) { free(col.arr); return result; }
     }
 
-    /* --- 3) Unterverzeichnis-Namen kompakt sichern, grossen Puffer freigeben --- */
+    /* --- 3) save subdirectory names compactly, free the large buffer --- */
     nd = extract_subdirs(&col, &dirs);
     free(col.arr);
 
-    /* --- 4) in die Unterverzeichnisse absteigen --- */
+    /* --- 4) descend into the subdirectories --- */
     for (j = 0; j < nd; j++) {
         char childR[DC_PATHMAX], childL[DC_PATHMAX];
         join_remote(childR, (int)sizeof(childR), remoteDir, dirs[j]);
@@ -259,7 +258,7 @@ int dircopy_download(FtpClient *ftp, const char *remotePath, const char *localDi
                      DirCopyItemCb itemcb, FtpProgressCb progcb,
                      DirCopyConflictCb conflictcb, void *ctx)
 {
-    /* Blattname (fuer die Anzeige) aus dem Remote-Pfad ableiten. */
+    /* Derive the leaf name (for display) from the remote path. */
     const char *leaf = remotePath;
     const char *p;
     for (p = remotePath; *p; p++)
@@ -270,7 +269,7 @@ int dircopy_download(FtpClient *ftp, const char *remotePath, const char *localDi
 }
 
 /* ------------------------------------------------------------------ */
-/* Baum-Zaehlung (fuer die Loesch-Warnung)                             */
+/* Tree count (for the delete warning)                                 */
 /* ------------------------------------------------------------------ */
 static int count_local_recurse(const char *dir, unsigned *nf, unsigned *nd, int depth)
 {
@@ -300,7 +299,7 @@ static int count_local_recurse(const char *dir, unsigned *nf, unsigned *nd, int 
 
 int dircopy_count_local(const char *path, unsigned *nfiles, unsigned *ndirs)
 {
-    (*ndirs)++;                          /* das Wurzelverzeichnis selbst */
+    (*ndirs)++;                          /* the root directory itself */
     return count_local_recurse(path, nfiles, ndirs, 0);
 }
 
@@ -341,12 +340,12 @@ static int count_remote_recurse(FtpClient *ftp, const char *dir,
 int dircopy_count_remote(FtpClient *ftp, const char *path,
                          unsigned *nfiles, unsigned *ndirs)
 {
-    (*ndirs)++;                          /* das Wurzelverzeichnis selbst */
+    (*ndirs)++;                          /* the root directory itself */
     return count_remote_recurse(ftp, path, nfiles, ndirs, 0);
 }
 
 /* ------------------------------------------------------------------ */
-/* Rekursives Loeschen                                                 */
+/* Recursive delete                                                     */
 /* ------------------------------------------------------------------ */
 static int delete_local_recurse(const char *dir, const char *leaf, int depth,
                                 DirCopyItemCb itemcb, void *ctx)
@@ -361,7 +360,7 @@ static int delete_local_recurse(const char *dir, const char *leaf, int depth,
 
     if (depth > DC_MAXDEPTH) return FTP_ERR_GENERAL;
 
-    /* --- Ebene sammeln (collect-then-delete: sicher gegenueber findnext) --- */
+    /* --- collect the level (collect-then-delete: safe against findnext) --- */
     arr = (DcEnt *)malloc((unsigned)DC_LISTCAP * sizeof(DcEnt));
     if (!arr) return FTP_ERR_LOCALIO;
     col.arr = arr; col.cap = DC_LISTCAP; col.count = 0;
@@ -378,7 +377,7 @@ static int delete_local_recurse(const char *dir, const char *leaf, int depth,
         rc = _dos_findnext(&ff);
     }
 
-    /* --- 1) Dateien loeschen --- */
+    /* --- 1) delete files --- */
     for (i = 0; i < col.count; i++) {
         char child[DC_PATHMAX];
         if (arr[i].is_dir) continue;
@@ -387,7 +386,7 @@ static int delete_local_recurse(const char *dir, const char *leaf, int depth,
         if (remove(child) != 0) errors++;
     }
 
-    /* --- 2) Unterverzeichnisse sichern, grossen Puffer freigeben, absteigen --- */
+    /* --- 2) save subdirectories, free the large buffer, descend --- */
     nsub = extract_subdirs(&col, &subs);
     free(arr);
     for (j = 0; j < nsub; j++) {
@@ -398,7 +397,7 @@ static int delete_local_recurse(const char *dir, const char *leaf, int depth,
     }
     if (subs) free(subs);
 
-    /* --- 3) das nun leere Verzeichnis selbst entfernen --- */
+    /* --- 3) remove the now-empty directory itself --- */
     if (itemcb) itemcb(ctx, leaf, 1);
     if (_rmdir(dir) != 0) errors++;
 
@@ -431,7 +430,7 @@ static int delete_remote_recurse(FtpClient *ftp, const char *dir, const char *le
     rc = ftp->list(dir, dc_on_line, &col);
     if (rc != FTP_OK) { free(col.arr); return rc; }
 
-    /* --- 1) Dateien loeschen (DELE mit vollem Pfad) --- */
+    /* --- 1) delete files (DELE with full path) --- */
     for (i = 0; i < col.count; i++) {
         char child[DC_PATHMAX];
         if (col.arr[i].is_dir) continue;
@@ -440,7 +439,7 @@ static int delete_remote_recurse(FtpClient *ftp, const char *dir, const char *le
         if (ftp->remove_file(child) != FTP_OK) errors++;
     }
 
-    /* --- 2) Unterverzeichnisse sichern, Puffer freigeben, absteigen --- */
+    /* --- 2) save subdirectories, free buffer, descend --- */
     nsub = extract_subdirs(&col, &subs);
     free(col.arr);
     for (j = 0; j < nsub; j++) {
@@ -451,7 +450,7 @@ static int delete_remote_recurse(FtpClient *ftp, const char *dir, const char *le
     }
     if (subs) free(subs);
 
-    /* --- 3) das nun leere Verzeichnis selbst entfernen (RMD) --- */
+    /* --- 3) remove the now-empty directory itself (RMD) --- */
     if (itemcb) itemcb(ctx, leaf, 1);
     if (ftp->remove_dir(dir) != FTP_OK) errors++;
 

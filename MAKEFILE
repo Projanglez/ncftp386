@@ -3,17 +3,17 @@
 # Open Watcom Makefile (wmake)
 # =============================================================================
 #
-# Voraussetzungen:
-#   - Open Watcom C/C++ installiert und im PATH (WATCOM env-Variable gesetzt)
-#   - Offizielle mTCP-Quellen (Version 2025-01-10) von der mTCP-Homepage:
+# Prerequisites:
+#   - Open Watcom C/C++ installed and in PATH (WATCOM env variable set)
+#   - Official mTCP sources (version 2025-01-10) from the mTCP homepage:
 #       http://www.brutman.com/mTCP/mTCP.html
-#     Das Quellarchiv herunterladen und nach ./mtcp/ entpacken.
+#     Download the source archive and unpack it into ./mtcp/.
 #
-# Verzeichnisstruktur nach dem Entpacken:
-#   ./mtcp/TCPLIB/   = TCP/IP Bibliotheks-Quellen (.CPP)
-#   ./mtcp/TCPINC/   = TCP/IP Header-Dateien
-#   ./mtcp/INCLUDE/  = App-uebergreifende Includes
-#   ./mtcp/APPS/FTP/ = Referenz-FTP-Client (zum Nachschlagen)
+# Directory structure after unpacking:
+#   ./mtcp/TCPLIB/   = TCP/IP library sources (.CPP)
+#   ./mtcp/TCPINC/   = TCP/IP header files
+#   ./mtcp/INCLUDE/  = cross-app shared includes
+#   ./mtcp/APPS/FTP/ = reference FTP client (for looking things up)
 #
 # Build:  wmake
 # Clean:  wmake clean
@@ -26,27 +26,27 @@ LINK    = wlink
 RM      = del /Q /F
 
 # -----------------------------------------------------------------------------
-# Compiler-Flags
+# Compiler flags
 # -ml  = Large Memory Model
-# -0   = 8086-Instruktionssatz (kompatibel mit 8086/286/386+)
-# -zu  = SS != DS (zwingend fuer mTCP!)
-# -s   = kein Stack-Overflow-Check
-# -ox  = maximale Optimierung
-# -bt=dos = DOS-Target
-# -zp1 = Byte-Alignment in Structs
-# -ei  = enum als int
+# -0   = 8086 instruction set (compatible with 8086/286/386+)
+# -zu  = SS != DS (mandatory for mTCP!)
+# -s   = no stack overflow check
+# -ox  = maximum optimization
+# -bt=dos = DOS target
+# -zp1 = byte alignment in structs
+# -ei  = enum as int
 # -----------------------------------------------------------------------------
 CFLAGS  = -ml -0 -zu -s -ox -bt=dos -zp1 -ei
 INCPATH = -I./src -I./mtcp/TCPINC -I./mtcp/INCLUDE
 
 # -----------------------------------------------------------------------------
-# Ausgabe
+# Output
 # -----------------------------------------------------------------------------
 TARGET  = NCFTP386.EXE
 MAPFILE = NCFTP386.MAP
 
 # -----------------------------------------------------------------------------
-# Applikations-Objekte
+# Application objects
 # -----------------------------------------------------------------------------
 APP_OBJS = &
     src\ncftp.obj &
@@ -63,10 +63,10 @@ APP_OBJS = &
     src\i18n.obj
 
 # -----------------------------------------------------------------------------
-# mTCP-Kern-Objekte (aus TCPLIB/)
-# Orientiere dich an mtcp\APPS\FTP\makefile fuer die genaue Dateiliste.
-# Dateiliste der offiziellen 2025-01-10-Version. Gegenueber aelteren mTCP-
-# Staenden kam trace.obj als feste Abhaengigkeit des FTP-Clients hinzu.
+# mTCP core objects (from TCPLIB/)
+# See mtcp\APPS\FTP\makefile for the exact file list.
+# File list for the official 2025-01-10 version. Compared to older mTCP
+# versions, trace.obj was added as a fixed dependency of the FTP client.
 # -----------------------------------------------------------------------------
 MTCP_OBJS = &
     mtcp\TCPLIB\arp.obj &
@@ -85,7 +85,7 @@ MTCP_OBJS = &
 ALL_OBJS = $(APP_OBJS) $(MTCP_OBJS)
 
 # -----------------------------------------------------------------------------
-# Haupt-Target
+# Main target
 # -----------------------------------------------------------------------------
 all: $(TARGET) .SYMBOLIC
 
@@ -97,13 +97,13 @@ $(TARGET): $(ALL_OBJS)
         name $(TARGET) &
         file { $(ALL_OBJS) }
     @echo.
-    @echo Build erfolgreich: $(TARGET)
+    @echo Build successful: $(TARGET)
 
 # -----------------------------------------------------------------------------
-# Applikations-Quellen
+# Application sources
 # -----------------------------------------------------------------------------
-# -zt256: grosse Panel-Globals (g_left/g_right, ~25 KB je) in FAR-Datensegmente
-# legen, damit DGROUP (64 KB, large model) nicht ueberlaeuft.
+# -zt256: put the large panel globals (g_left/g_right, ~25 KB each) into
+# FAR data segments so DGROUP (64 KB, large model) doesn't overflow.
 src\ncftp.obj: src\ncftp.cpp src\tui.h src\panel.h src\lpanel.h src\rpanel.h src\ftpcli.h src\keymap.h src\dialog.h src\viewer.h src\editor.h src\dircopy.h src\connsave.h src\i18n.h src\umlaut.h
     $(CPP) $(CFLAGS) -zt256 $(INCPATH) -fo=$@ $[@
 
@@ -141,29 +141,30 @@ src\i18n.obj: src\i18n.cpp src\i18n.h
     $(CPP) $(CFLAGS) $(INCPATH) -fo=$@ $[@
 
 # -----------------------------------------------------------------------------
-# mTCP-Kern-Quellen (TCPLIB/)
-# Flags: zusaetzlich -I./mtcp/TCPLIB fuer interne mTCP-Includes
+# mTCP core sources (TCPLIB/)
+# Flags: additionally -I./mtcp/TCPLIB for internal mTCP includes
 # -----------------------------------------------------------------------------
-# -DCFG_H="ncftp.cfg": jeder mTCP-Header macht `#include CFG_H`.
-# ncftp.cfg liegt in src/ und wird ueber -I./src (in INCPATH) gefunden.
-# Kein -zp2: da der mTCP-Referenz-Build mit -zp2 -zpw -we warnungsfrei ist,
-# fuegt -zp2 keinerlei Padding hinzu -> Layout ist identisch zu unserem
-# -zp1. So bleiben alle Objekte (auch ftpcli.obj mit inline-Methoden aus
-# tcp.h) bei -zp1 konsistent.
+# -DCFG_H="ncftp.cfg": every mTCP header does `#include CFG_H`.
+# ncftp.cfg lives in src/ and is found via -I./src (in INCPATH).
+# No -zp2: since the mTCP reference build is warning-free with
+# -zp2 -zpw -we, -zp2 doesn't add any padding -> the layout is identical
+# to our -zp1. This keeps all objects (including ftpcli.obj with inline
+# methods from tcp.h) consistent at -zp1.
 #
-# WICHTIG: mTCP wird mit -0 (8086) gebaut, NICHT mit -3 (386)!
-# packet.cpp::receiver() ist der vom Packet-Driver per FAR CALL aufgerufene
-# Empfangs-Callback. Er hat einen VON HAND geschriebenen Assembler-Epilog
-# (pop ax/ax/es/ds/di/si/bp/bx/bx/dx/cx/ax; retf = 12 Worte + retf), der
-# exakt zum 8086-__interrupt-Prolog passt (push ax/cx/dx/bx/sp/bp/si/di +
-# ds/es + 2 Pad = 12 Worte). Mit -3 rettet der Compiler-Prolog ZUSAETZLICH
-# die 386-Segmentregister FS und GS (pusha+ds+es+fs+gs+sub sp,4 = 14 Worte),
-# die der feste Epilog NICHT zurueckholt -> nach den 12 pops liegen FS/GS
-# noch auf dem Stack -> retf liest Muell als Ruecksprungadresse -> harter
-# Haenger im Interrupt-Kontext beim ERSTEN empfangenen Paket (Strg+Alt+Entf
-# tot). Verifiziert per wdis-Disassembly. Die mTCP-Referenz (APPS/FTP/
-# MAKEFILE) baut ebenfalls mit -0. 8086-Code laeuft problemlos auf dem 386;
-# nur unser eigener App-Code nutzt -3. (ipasm.asm: bereits wasm -0, s.u.)
+# IMPORTANT: mTCP is built with -0 (8086), NOT with -3 (386)!
+# packet.cpp::receiver() is the receive callback invoked by the packet
+# driver via FAR CALL. It has a HAND-WRITTEN assembler epilogue
+# (pop ax/ax/es/ds/di/si/bp/bx/bx/dx/cx/ax; retf = 12 words + retf) that
+# exactly matches the 8086 __interrupt prologue (push ax/cx/dx/bx/sp/bp/si/di +
+# ds/es + 2 pad = 12 words). With -3, the compiler prologue ADDITIONALLY
+# saves the 386 segment registers FS and GS (pusha+ds+es+fs+gs+sub sp,4 =
+# 14 words), which the fixed epilogue does NOT pop back -> after the 12
+# pops, FS/GS are still left on the stack -> retf reads garbage as the
+# return address -> a hard hang in interrupt context on the FIRST received
+# packet (Ctrl+Alt+Del dead). Verified via wdis disassembly. The mTCP
+# reference (APPS/FTP/MAKEFILE) also builds with -0. 8086 code runs fine
+# on the 386; only our own app code uses -3. (ipasm.asm: already wasm -0,
+# see below.)
 MCFLAGS = -ml -0 -zu -s -ox -bt=dos -zp1 -ei
 MFLAGS  = $(MCFLAGS) -DCFG_H="ncftp.cfg" -I./mtcp/TCPLIB $(INCPATH)
 
@@ -179,7 +180,7 @@ mtcp\TCPLIB\eth.obj: mtcp\TCPLIB\eth.cpp src\ncftp.cfg
 mtcp\TCPLIB\ip.obj: mtcp\TCPLIB\ip.cpp src\ncftp.cfg
     $(CPP) $(MFLAGS) -fo=$@ $[@
 
-# ipasm.asm waehlt das Speichermodell ueber __LARGE__ (von wasm -ml gesetzt).
+# ipasm.asm selects the memory model via __LARGE__ (set by wasm -ml).
 mtcp\TCPLIB\ipasm.obj: mtcp\TCPLIB\ipasm.asm
     $(ASM) -0 -ml -fo=$@ $[@
 
@@ -205,11 +206,11 @@ mtcp\TCPLIB\utils.obj: mtcp\TCPLIB\utils.cpp src\ncftp.cfg
     $(CPP) $(MFLAGS) -fo=$@ $[@
 
 # -----------------------------------------------------------------------------
-# Aufraeumen
+# Cleanup
 # -----------------------------------------------------------------------------
 clean: .SYMBOLIC
     -$(RM) src\*.obj 2>nul
     -$(RM) mtcp\TCPLIB\*.obj 2>nul
     -$(RM) $(TARGET) 2>nul
     -$(RM) $(MAPFILE) 2>nul
-    @echo Clean abgeschlossen.
+    @echo Clean complete.

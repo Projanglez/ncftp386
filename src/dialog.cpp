@@ -1,5 +1,5 @@
 /* =============================================================================
- * dialog.cpp - Modale Dialoge
+ * dialog.cpp - Modal dialogs
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  * ===========================================================================*/
@@ -12,23 +12,23 @@
 #include "tui.h"
 #include "keymap.h"
 #include "i18n.h"
-#include "umlaut.h"   /* immer als letzter Include */
+#include "umlaut.h"   /* always the last include */
 
-/* Puffer fuer den gesicherten Bildschirm hinter dem Dialog (4000 Bytes). */
+/* Buffer for the saved screen behind the dialog (4000 bytes). */
 static unsigned char dlg_screen[SCREEN_CELLS * 2];
 
-/* Eigener Puffer fuer den Fortschrittsdialog: dieser darf gleichzeitig mit
- * einem modalen Dialog offen sein (z.B. die Ueberschreiben-Abfrage waehrend
- * eines laufenden Kopiervorgangs), daher braucht er eine getrennte Sicherung. */
+/* Separate buffer for the progress dialog: it may be open at the same time
+ * as a modal dialog (e.g. the overwrite prompt during a running copy
+ * operation), so it needs its own separate save buffer. */
 static unsigned char prog_screen[SCREEN_CELLS * 2];
 
-#define DLG_SHADOW 0x08   /* Attribut der Schlagschatten-Zellen (dunkel) */
+#define DLG_SHADOW 0x08   /* attribute of the drop-shadow cells (dark) */
 
 /* -------------------------------------------------------------------------
- * Hilfsfunktionen
+ * Helper functions
  * ---------------------------------------------------------------------- */
 
-/* Nachricht an '\n' in Zeilen zerlegen. Rueckgabe: Zeilenzahl (>=1). */
+/* Split a message into lines at '\n'. Returns: line count (>=1). */
 static int split_lines(const char *msg, char lines[][72])
 {
     int nl = 0, ci = 0;
@@ -53,7 +53,7 @@ static int split_lines(const char *msg, char lines[][72])
     return nl;
 }
 
-/* Schlagschatten rechts und unten am Dialog (Attribut-only). */
+/* Drop shadow to the right and below the dialog (attribute-only). */
 static void draw_shadow(int top, int left, int rows, int cols)
 {
     int r, c;
@@ -63,7 +63,7 @@ static void draw_shadow(int top, int left, int rows, int cols)
         putattr_at(top + rows, c, DLG_SHADOW);
 }
 
-/* Rahmen + Fuellung + zentrierter Titel auf der oberen Rahmenlinie. */
+/* Frame + fill + centered title on the top border line. */
 static void draw_dialog_frame(int top, int left, int rows, int cols,
                               const char *title, unsigned char bg)
 {
@@ -82,7 +82,7 @@ static void draw_dialog_frame(int top, int left, int rows, int cols,
     }
 }
 
-/* Knopf "[ label ]" zeichnen; focused -> hervorgehoben. */
+/* Draw a "[ label ]" button; focused -> highlighted. */
 static void draw_button(int row, int col, const char *label, int focused)
 {
     char tmp[40];
@@ -96,17 +96,17 @@ static int button_width(const char *label)
     return (int)strlen(label) + 4;   /* "[ " + label + " ]" */
 }
 
-/* Breite/Position eines zentrierten Dialogs aus Inhaltsbreite ableiten. */
+/* Derive the width/position of a centered dialog from its content width. */
 static int clamp_cols(int content_w)
 {
-    int cols = content_w + 4;        /* 2 Rahmen + je 1 Innenrand */
+    int cols = content_w + 4;        /* 2 borders + 1 inner margin each */
     if (cols > 76) cols = 76;
     if (cols < 12) cols = 12;
     return cols;
 }
 
 /* -------------------------------------------------------------------------
- * Hinweis-/Fehlerbox
+ * Notice/error box
  * ---------------------------------------------------------------------- */
 void dlg_message(const char *title, const char *msg, int is_error)
 {
@@ -124,7 +124,7 @@ void dlg_message(const char *title, const char *msg, int is_error)
     if (button_width(lbl) > w) w = button_width(lbl);
 
     cols = clamp_cols(w);
-    rows = nlines + 4;               /* Rahmen + Zeilen + Leerzeile + Knopf + Rahmen */
+    rows = nlines + 4;               /* border + lines + blank line + button + border */
     top  = (SCREEN_ROWS - rows) / 2;
     left = (SCREEN_COLS - cols) / 2;
 
@@ -150,21 +150,21 @@ void dlg_error(const char *title, const char *msg)
 }
 
 /* -------------------------------------------------------------------------
- * Ja/Nein-Abfrage
+ * Yes/No prompt
  * ---------------------------------------------------------------------- */
-/* Ja/Nein-Abfrage mit waehlbarem Vorgabe-Fokus (file-intern; oeffentlich nur
- * ueber dlg_confirm mit Vorgabe "Nein"). */
+/* Yes/No prompt with a selectable default focus (file-internal; publicly
+ * exposed only via dlg_confirm with the default set to "No"). */
 static int dlg_confirm_def(const char *title, const char *msg, int default_yes)
 {
     char lines[DLG_MAX_LINES][72];
     int nlines = split_lines(msg, lines);
     int w = 0, i, cols, rows, top, left;
     int btnrow, bw_ja, bw_nein, gap = 3, btotal, b0;
-    int focus = default_yes ? 0 : 1; /* 0 = "Ja", 1 = "Nein" (Default sicher) */
+    int focus = default_yes ? 0 : 1; /* 0 = "Yes", 1 = "No" (safe default) */
     int result;
     unsigned char bg = ATTR_DIALOG_BG;
-    const char *lbl_yes = L("Ja", "Yes");
-    const char *lbl_no  = L("Nein", "No");
+    const char *lbl_yes = L("Yes", "Ja");
+    const char *lbl_no  = L("No", "Nein");
 
     bw_ja   = button_width(lbl_yes);
     bw_nein = button_width(lbl_no);
@@ -211,16 +211,16 @@ static int dlg_confirm_def(const char *title, const char *msg, int default_yes)
 
 int dlg_confirm(const char *title, const char *msg)
 {
-    return dlg_confirm_def(title, msg, 0);   /* Vorgabe: "Nein" */
+    return dlg_confirm_def(title, msg, 0);   /* default: "No" */
 }
 
 /* -------------------------------------------------------------------------
- * Einzeiliges Eingabefeld
+ * Single-line input field
  * ---------------------------------------------------------------------- */
 int dlg_input(const char *title, const char *prompt,
               char *buf, int maxlen, int is_password)
 {
-    const char *hint = L("[Enter] OK   [Esc] Abbruch", "[Enter] OK   [Esc] Cancel");
+    const char *hint = L("[Enter] OK   [Esc] Cancel", "[Enter] OK   [Esc] Abbruch");
     int promptlen = prompt ? (int)strlen(prompt) : 0;
     int hintlen   = (int)strlen(hint);
     int fieldw, w, cols, rows, top, left, frow, fcol;
@@ -237,7 +237,7 @@ int dlg_input(const char *title, const char *prompt,
     if (title) { int t = (int)strlen(title); if (t > w) w = t; }
 
     cols = clamp_cols(w);
-    rows = 6;                        /* Rahmen, Prompt, Feld, Leer, Hinweis, Rahmen */
+    rows = 6;                        /* border, prompt, field, blank, hint, border */
     top  = (SCREEN_ROWS - rows) / 2;
     left = (SCREEN_COLS - cols) / 2;
     frow = top + 2;
@@ -284,19 +284,19 @@ int dlg_input(const char *title, const char *prompt,
 }
 
 /* -------------------------------------------------------------------------
- * Fortschrittsdialog (nicht-modal, per Callback aktualisiert)
+ * Progress dialog (non-modal, updated via callback)
  * -----------------------------------------------------------------------------
- * Teilt sich den Sicherungspuffer dlg_screen mit den uebrigen Dialogen: der
- * Fortschrittsdialog ist nie gleichzeitig mit einem anderen offen (dlg_input
- * schliesst vor dem Transfer, dlg_error oeffnet erst danach).
+ * Shares the dlg_screen save buffer with the other dialogs: the progress
+ * dialog is never open at the same time as another one (dlg_input closes
+ * before the transfer starts, dlg_error only opens afterwards).
  * ---------------------------------------------------------------------- */
 static int           prog_active = 0;
 static int           prog_top, prog_left, prog_cols, prog_rows;
 static int           prog_barrow, prog_barw;
-static long          prog_lastpct;     /* zuletzt gezeichnete %, -1 = noch nie  */
-static unsigned long prog_lastunit;    /* zuletzt gezeichnete 8-KB-Einheit       */
+static long          prog_lastpct;     /* last drawn %, -1 = never drawn yet  */
+static unsigned long prog_lastunit;    /* last drawn 8 KB unit                */
 
-/* Balken "[####....] NNN%" in die Bar-Zeile zeichnen (0xDB voll, 0xB0 leer). */
+/* Draw the "[####....] NNN%" bar in the bar row (0xDB full, 0xB0 empty). */
 static void prog_draw_bar(long pct)
 {
     char bar[84];
@@ -323,11 +323,11 @@ void dlg_progress_begin(const char *title, const char *fromname)
 
     prog_cols = 50;
     if (prog_cols > SCREEN_COLS - 2) prog_cols = SCREEN_COLS - 2;
-    prog_rows = 4;                          /* Rahmen, Dateizeile, Balken, Rahmen */
+    prog_rows = 4;                          /* border, file line, bar, border */
     prog_top  = (SCREEN_ROWS - prog_rows) / 2;
     prog_left = (SCREEN_COLS - prog_cols) / 2;
     prog_barrow = prog_top + 2;
-    prog_barw   = (prog_cols - 4) - 7;      /* Rest fuer "[" "]" " 100%"           */
+    prog_barw   = (prog_cols - 4) - 7;      /* remainder for "[" "]" " 100%"      */
     if (prog_barw < 4) prog_barw = 4;
     prog_lastpct  = -1;
     prog_lastunit = (unsigned long)-1L;
@@ -336,7 +336,7 @@ void dlg_progress_begin(const char *title, const char *fromname)
     save_screen(prog_screen);
     draw_dialog_frame(prog_top, prog_left, prog_rows, prog_cols, title, bg);
 
-    sprintf(buf, L("Datei: %.34s", "File: %.34s"), fromname ? fromname : "");
+    sprintf(buf, L("File: %.34s", "Datei: %.34s"), fromname ? fromname : "");
     draw_text(prog_top + 1, prog_left + 2, buf, bg, prog_cols - 4);
     prog_draw_bar(0);
 }
@@ -346,22 +346,22 @@ void dlg_progress_update(unsigned long sofar, unsigned long total)
     if (!prog_active) return;
 
     if (total > 0) {
-        /* Prozent berechnen, ueberlaufsicher fuer grosse Dateien. */
+        /* Compute the percentage, overflow-safe for large files. */
         unsigned long pct;
         if (sofar >= total)          pct = 100;
         else if (total > 42000000UL) pct = sofar / (total / 100UL);
         else                         pct = (sofar * 100UL) / total;
 
-        if ((long)pct == prog_lastpct) return;   /* nur bei Aenderung neu zeichnen */
+        if ((long)pct == prog_lastpct) return;   /* only redraw on a change */
         prog_lastpct = (long)pct;
         prog_draw_bar((long)pct);
     } else {
-        /* Unbekannte Groesse: uebertragene Bytes, alle 8 KB aktualisieren. */
+        /* Unknown size: bytes transferred, updated every 8 KB. */
         char buf[80];
         unsigned long unit = sofar >> 13;
         if (unit == prog_lastunit) return;
         prog_lastunit = unit;
-        sprintf(buf, L("%lu Bytes " ue "bertragen ...", "%lu bytes transferred ..."), sofar);
+        sprintf(buf, L("%lu bytes transferred ...", "%lu Bytes " ue "bertragen ..."), sofar);
         fill_rect(prog_barrow, prog_left + 2, 1, prog_cols - 4, ' ', ATTR_DIALOG_BG);
         draw_text(prog_barrow, prog_left + 2, buf, ATTR_DIALOG_BG, prog_cols - 4);
     }
@@ -376,7 +376,7 @@ void dlg_progress_setfile(const char *name)
     prog_lastunit = (unsigned long)-1L;
 
     fill_rect(prog_top + 1, prog_left + 2, 1, prog_cols - 4, ' ', ATTR_DIALOG_BG);
-    sprintf(buf, L("Datei: %.34s", "File: %.34s"), name ? name : "");
+    sprintf(buf, L("File: %.34s", "Datei: %.34s"), name ? name : "");
     draw_text(prog_top + 1, prog_left + 2, buf, ATTR_DIALOG_BG, prog_cols - 4);
     prog_draw_bar(0);
 }
@@ -389,7 +389,7 @@ void dlg_progress_end(void)
 }
 
 /* -------------------------------------------------------------------------
- * Auswahldialog (Nachricht + vertikale Optionsliste)
+ * Choice dialog (message + vertical option list)
  * ---------------------------------------------------------------------- */
 int dlg_choice(const char *title, const char *msg,
                const char *const *items, int count)
@@ -406,7 +406,7 @@ int dlg_choice(const char *title, const char *msg,
     for (i = 0; i < count;  i++) { int l = (int)strlen(items[i]) + 2; if (l > w) w = l; }
 
     cols    = clamp_cols(w);
-    rows    = nlines + count + 3;   /* Rahmen, Text, Leerzeile, Optionen, Rahmen */
+    rows    = nlines + count + 3;   /* border, text, blank line, options, border */
     top     = (SCREEN_ROWS - rows) / 2;
     left    = (SCREEN_COLS - cols) / 2;
     optrow0 = top + 1 + nlines + 1;
@@ -437,7 +437,7 @@ int dlg_choice(const char *title, const char *msg,
 }
 
 /* -------------------------------------------------------------------------
- * Vertikales Auswahlmenue
+ * Vertical selection menu
  * ---------------------------------------------------------------------- */
 int dlg_menu(const char *title, const char *const *items, int count, int initial)
 {
@@ -456,7 +456,7 @@ int dlg_menu(const char *title, const char *const *items, int count, int initial
     maxvis = SCREEN_ROWS - 6;
     if (maxvis < 1) maxvis = 1;
     vis    = (count < maxvis) ? count : maxvis;
-    rows   = vis + 2;                         /* Rahmen oben/unten + Eintraege */
+    rows   = vis + 2;                         /* top/bottom border + entries */
     top    = (SCREEN_ROWS - rows) / 2;
     left   = (SCREEN_COLS - cols) / 2;
 
@@ -492,7 +492,7 @@ int dlg_menu(const char *title, const char *const *items, int count, int initial
         else if (k == KEY_PGUP)  { sel -= vis; if (sel < 0) sel = 0; }
         else if (k == KEY_PGDN)  { sel += vis; if (sel > count - 1) sel = count - 1; }
         else if (k >= 0x20 && k < 0x7F) {
-            /* Direktwahl: erster Eintrag mit passendem Anfangsbuchstaben. */
+            /* Direct selection: first entry starting with the matching letter. */
             int up = toupper((unsigned char)k);
             int hit = -1;
             for (i = 0; i < count && hit < 0; i++)
@@ -506,24 +506,24 @@ int dlg_menu(const char *title, const char *const *items, int count, int initial
 }
 
 /* -------------------------------------------------------------------------
- * FTP-Verbindungsformular: Host/Port/User/Pass + Speicher-Checkboxen
+ * FTP connect form: Host/Port/User/Pass + save checkboxes
  *
  * Layout (cols=50, rows=11):
- *  Row 0:  Rahmen mit Titel
- *  Row 1:  Host-Feld
- *  Row 2:  Port-Feld
- *  Row 3:  User-Feld
- *  Row 4:  Pass-Feld (maskiert)
- *  Row 5:  Trennlinie
- *  Row 6:  [X] Verbindungsdaten speichern
- *  Row 7:  [ ] Passwort speichern (unsicher)
- *  Row 8:  Trennlinie
- *  Row 9:  Buttons [ Verbinden ]  [ Abbrechen ]
- *  Row 10: Rahmen unten
+ *  Row 0:  border with title
+ *  Row 1:  host field
+ *  Row 2:  port field
+ *  Row 3:  user field
+ *  Row 4:  pass field (masked)
+ *  Row 5:  divider
+ *  Row 6:  [X] Save connection data
+ *  Row 7:  [ ] Save password (insecure)
+ *  Row 8:  divider
+ *  Row 9:  buttons [ Connect ]  [ Cancel ]
+ *  Row 10: bottom border
  *
- * Fokus-Reihenfolge: Host(0) Port(1) User(2) Pass(3)
- *                    chk_save(4) chk_pass(5) btn_ok(6) btn_cancel(7)
- * Tab/Down vorwaerts, Up rueckwaerts. Space/Enter auf Checkbox toggled.
+ * Focus order: Host(0) Port(1) User(2) Pass(3)
+ *              chk_save(4) chk_pass(5) btn_ok(6) btn_cancel(7)
+ * Tab/Down forward, Up backward. Space/Enter on a checkbox toggles it.
  * ---------------------------------------------------------------------- */
 int dlg_connect(const char *title,
                 char *host, int host_max,
@@ -537,13 +537,13 @@ int dlg_connect(const char *title,
     int rows   = 11;
     int top    = (SCREEN_ROWS - rows) / 2;
     int left   = (SCREEN_COLS - cols) / 2;
-    int inner  = cols - 4;          /* nutzbarer Innenbereich                */
-    int fdw    = inner - 6;         /* Feld-Anzeigebreite: inner - "Host: "  */
-    int fcol   = left + 2 + 6;      /* linke Kante der Eingabefelder         */
+    int inner  = cols - 4;          /* usable inner area                     */
+    int fdw    = inner - 6;         /* field display width: inner - "Host: " */
+    int fcol   = left + 2 + 6;      /* left edge of the input fields         */
     int NFOCUS = 8;
-    int focus  = (host[0] != '\0') ? 6 : 0;  /* vorbelegt: gleich Verbinden */
+    int focus  = (host[0] != '\0') ? 6 : 0;  /* pre-filled: focus Connect directly */
 
-    /* Textfelder */
+    /* Text fields */
     char *fbufs[4];
     int   fmaxs[4];
     int   flens[4];
@@ -569,14 +569,14 @@ int dlg_connect(const char *title,
         if (flens[i] > fmaxs[i]) { flens[i] = fmaxs[i]; fbufs[i][flens[i]] = '\0'; }
     }
 
-    /* Checkbox-Zustand (lokal; erst bei OK in *save_conn/*save_pass schreiben) */
+    /* Checkbox state (local; only written to *save_conn/*save_pass on OK) */
     int chk_save = *save_conn;
     int chk_pass = *save_pass;
     if (!chk_save) chk_pass = 0;
 
     /* Buttons */
-    const char *lbl_ok     = L("Verbinden", "Connect");
-    const char *lbl_cancel = L("Abbrechen", "Cancel");
+    const char *lbl_ok     = L("Connect", "Verbinden");
+    const char *lbl_cancel = L("Cancel", "Abbrechen");
     int bw_ok     = button_width(lbl_ok);
     int bw_cancel = button_width(lbl_cancel);
     int gap       = 4;
@@ -586,15 +586,15 @@ int dlg_connect(const char *title,
     unsigned char bg = ATTR_DIALOG_BG;
     int result = 0;
 
-    /* Bildschirm sichern und Rahmen zeichnen */
+    /* Save the screen and draw the frame */
     save_screen(dlg_screen);
     draw_dialog_frame(top, left, rows, cols, title, bg);
 
-    /* Statische Labels */
+    /* Static labels */
     for (i = 0; i < 4; i++)
         draw_text(frows[i], left + 2, flbls[i], bg, 6);
 
-    /* Trennlinien */
+    /* Divider lines */
     draw_hsep(top + 5, left, cols, bg, 1);
     draw_hsep(top + 8, left, cols, bg, 1);
 
@@ -604,7 +604,7 @@ int dlg_connect(const char *title,
         int k;
         char tmp[56];
 
-        /* Textfelder neu zeichnen */
+        /* Redraw the text fields */
         for (i = 0; i < 4; i++) {
             int is_focused = (focus == i);
             unsigned char fa = is_focused ? ATTR_DIALOG_HL : bg;
@@ -623,16 +623,16 @@ int dlg_connect(const char *title,
                 set_cursor(frows[i], fcol + (caret - start));
         }
 
-        /* Checkboxen */
+        /* Checkboxes */
         {
             unsigned char a4 = (focus == 4) ? ATTR_DIALOG_HL : bg;
             unsigned char a5 = (focus == 5) ? ATTR_DIALOG_HL : bg;
             sprintf(tmp, "[%c] %s", chk_save ? 'X' : ' ',
-                    L("Verbindungsdaten speichern", "Save connection data"));
+                    L("Save connection data", "Verbindungsdaten speichern"));
             fill_rect(top + 6, left + 2, 1, inner, ' ', a4);
             draw_text(top + 6, left + 2, tmp, a4, inner);
             sprintf(tmp, "[%c] %s", chk_pass ? 'X' : ' ',
-                    L("Passwort speichern (unsicher)", "Save password (insecure)"));
+                    L("Save password (insecure)", "Passwort speichern (unsicher)"));
             fill_rect(top + 7, left + 2, 1, inner, ' ', a5);
             draw_text(top + 7, left + 2, tmp, a5, inner);
         }
@@ -645,14 +645,14 @@ int dlg_connect(const char *title,
 
         if (k == KEY_ESC) { result = 0; break; }
 
-        /* Navigation vorwaerts */
+        /* Forward navigation */
         if (k == KEY_TAB || k == KEY_DOWN)
         { focus = (focus + 1) % NFOCUS; continue; }
-        /* Navigation rueckwaerts (Up oder Shift+Tab = 0x10F) */
+        /* Backward navigation (Up or Shift+Tab = 0x10F) */
         if (k == KEY_UP || k == 0x10F)
         { focus = (focus + NFOCUS - 1) % NFOCUS; continue; }
 
-        /* Fokus-spezifische Eingabe */
+        /* Focus-specific input */
         if (focus >= 0 && focus <= 3) {
             int fi = focus;
             if (k == KEY_ENTER) {
@@ -689,7 +689,7 @@ int dlg_connect(const char *title,
 }
 
 /* -------------------------------------------------------------------------
- * Splash-Screen
+ * Splash screen
  * ---------------------------------------------------------------------- */
 void dlg_splash(const char *version)
 {
@@ -699,7 +699,7 @@ void dlg_splash(const char *version)
     char titlebuf[40];
     clock_t t0;
 
-    /* Hilfsmakro: Text zentriert in der Box zeichnen */
+    /* Helper macro: draw text centered in the box */
 #define SPLASH_LINE(row, text, attr) \
     { const char *_t = (text); int _l = (int)strlen(_t); \
       draw_text((row), (c) + 1 + (inner - _l) / 2, _t, (attr), _l); }
@@ -713,13 +713,13 @@ void dlg_splash(const char *version)
 
     SPLASH_LINE(r + 2, titlebuf,
                 ATTR_DIALOG_HL)
-    SPLASH_LINE(r + 3, L("Dual-Panel FTP Client f" ue "r DOS",
-                          "Dual-Panel FTP Client for DOS"),
+    SPLASH_LINE(r + 3, L("Dual-Panel FTP Client for DOS",
+                          "Dual-Panel FTP Client f" ue "r DOS"),
                 bg)
     SPLASH_LINE(r + 5, "(c) 2026  Projanglez",             bg)
     SPLASH_LINE(r + 6, "GNU General Public License v3",    bg)
-    SPLASH_LINE(r + 8, L("[Beliebige Taste zum Starten]",
-                          "[Any key to start]"),
+    SPLASH_LINE(r + 8, L("[Any key to start]",
+                          "[Beliebige Taste zum Starten]"),
                 bg)
 
 #undef SPLASH_LINE
