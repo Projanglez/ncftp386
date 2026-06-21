@@ -1,5 +1,5 @@
 # =============================================================================
-# NCFTP386 - Norton Commander FTP Client for MS-DOS 386
+# FTP4DOS - Norton Commander FTP Client for MS-DOS 386
 # Open Watcom Makefile (wmake)
 # =============================================================================
 #
@@ -42,8 +42,8 @@ INCPATH = -I./src -I./mtcp/TCPINC -I./mtcp/INCLUDE
 # -----------------------------------------------------------------------------
 # Output
 # -----------------------------------------------------------------------------
-TARGET  = NCFTP386.EXE
-MAPFILE = NCFTP386.MAP
+TARGET  = FTP4DOS.EXE
+MAPFILE = FTP4DOS.MAP
 
 # -----------------------------------------------------------------------------
 # Application objects

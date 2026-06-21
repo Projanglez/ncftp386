@@ -1,4 +1,4 @@
-# NCFTP386
+# FTP4DOS
 
 A Norton Commander-style **dual-panel FTP client for MS-DOS** running on any
 x86 machine. The left panel shows the local DOS filesystem; the right panel
@@ -6,21 +6,23 @@ connects to an FTP server via the
 [mTCP](http://www.brutman.com/mTCP/mTCP.html) TCP/IP stack — fully
 keyboard-driven in 80×25 text mode.
 
-![NCFTP386 downloading DOOM.EXE](docs/screenshot.png)
+![FTP4DOS downloading DOOM.EXE](docs/screenshot.png)
 
-Download latest release here: <https://github.com/Projanglez/ncftp386/releases/latest>
+Download latest release here: <https://github.com/Projanglez/ftp4dos/releases/latest>
 
 ## Features
 
 - Two panels: local (DOS) and remote (FTP, passive mode)
 - Copy in both directions (F5), including **recursive directory trees**
 - Multiple selection with the **Ins key** (Norton style) for copy/delete
-- Create (F7), rename (F6), **recursive delete** with pre-count confirmation (F8)
+- Move (F6) and rename (Alt+F6); **recursive** move/copy/delete for whole directory trees
+- Create directories (F7), **recursive delete** with pre-count confirmation (F8)
+- Swap the two panels left/right with Ctrl+U (remembered across launches)
 - Navigate directories; view files with F3 (or Enter) — up to 32 KB displayed
 - Remote view (F3) downloads to a temporary file first, then opens the viewer
 - Edit local text files with F4 — minimal full-screen editor (~32 KB, local only)
 - FTP connection keepalive: sends NOOP every 60 s to prevent server idle timeouts
-- Bilingual German/English UI (auto-detected from DOS country setting, or forced on the command line: `NCFTP386 /L:EN`)
+- Bilingual German/English UI (auto-detected from DOS country setting, or forced on the command line: `FTP4DOS /L:EN`)
 
 ## Build requirements
 
@@ -44,7 +46,7 @@ release rather than a third-party mirror.
 Then build with Open Watcom:
 
 ```sh
-wmake          # produces NCFTP386.EXE
+wmake          # produces FTP4DOS.EXE
 wmake clean    # removes objects and build artifacts
 ```
 
@@ -56,13 +58,13 @@ uses `-0` (compatible with 8086/286/386+). Details are in `MAKEFILE` and `CLAUDE
 A packet driver for your network card and an valid mTCP configuration file are required, as well as a valid IP-adress (static or dynamic) via mTCP.
 
 ```bat
-NCFTP386.EXE
+FTP4DOS.EXE
 ```
 
 ### Command-line parameters
 
 ```
-NCFTP386 [/L:DE|EN] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/S:ALL|NOPASS|OFF]   (or /?)
+FTP4DOS [/L:DE|EN] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/S:ALL|NOPASS|OFF] [/MONO|/COLOR]   (or /?)
 ```
 
 Both `/` and `-` are accepted as the flag prefix. Flags are **case-insensitive**;
@@ -75,7 +77,7 @@ values are passed through as-is (username and password are case-sensitive).
 | `/P:PORT` | Port (default 21) |
 | `/U:USER` | Username (default `anonymous`) |
 | `/W:PASS` | Password |
-| `/S:ALL` | Save connection including password to `NCFTP386.SAV` (default) |
+| `/S:ALL` | Save connection including password to `FTP4DOS.SAV` (default) |
 | `/S:NOPASS` | Save connection but not the password |
 | `/S:OFF` | Do not save this connection |
 | `/?` | Show brief help |
@@ -83,7 +85,7 @@ values are passed through as-is (username and password are case-sensitive).
 ### Saved connection
 
 After a successful connection, host/port/username (and optionally the password)
-are stored in `NCFTP386.SAV` next to the EXE and pre-filled on the next launch.
+are stored in `FTP4DOS.SAV` next to the EXE and pre-filled on the next launch.
 Use `/S:ALL` (default), `/S:NOPASS`, or `/S:OFF` to control what gets saved;
 the connect dialog offers the same three choices interactively.
 
@@ -95,6 +97,7 @@ encrypted — and FTP transmits passwords in plain text anyway.
 | Key | Action |
 |-----|--------|
 | Tab | Switch active panel |
+| Ctrl+U | Swap panels left/right (remembered) |
 | Arrow keys / PgUp PgDn | Move selection |
 | Ins | Mark entry (for multi-file copy/delete) |
 | * (numpad) | Invert selection |
@@ -106,10 +109,11 @@ encrypted — and FTP transmits passwords in plain text anyway.
 | F3 | View file (local or remote; max 32 KB) |
 | F4 | Edit local file (minimal editor, ~32 KB, no undo/search) |
 | F5 | Copy (recursive for directories) |
-| F6 | Rename / move |
+| F6 | Move (copy then delete source; recursive) |
+| Alt+F6 | Rename (in place) |
 | F7 | Create directory |
 | F8 | Delete (recursive with confirmation) |
-| F9 | Switch local drive |
+| F9 / Alt+F1 | Switch local drive |
 | F10 | Quit |
 
 ## License

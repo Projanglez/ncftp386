@@ -11,27 +11,76 @@
 
 #include "tui.h"
 
-/* Segment of the color text memory. Monochrome adapters sit at 0xB000 - we
- * assume color (see CLAUDE.md, ATTR_PANEL = white on blue). */
-#define VIDEO_SEG 0xB800u
+/* Text video segment: 0xB800 on color adapters (CGA/EGA/VGA), 0xB000 on a
+ * monochrome adapter (MDA/Hercules). Chosen at tui_init() time. */
+#define VIDEO_SEG_COLOR 0xB800u
+#define VIDEO_SEG_MONO  0xB000u
+
+static unsigned int  g_vidseg = VIDEO_SEG_COLOR;
+static int           g_mono   = 0;   /* 1 = monochrome adapter (mode 7)        */
 
 /* Far pointer to the top-left screen cell. Wrapped in a function so MK_FP
  * doesn't have to be evaluated as a static initializer. */
 static unsigned char far *vidmem(void)
 {
-    return (unsigned char far *)MK_FP(VIDEO_SEG, 0);
+    return (unsigned char far *)MK_FP(g_vidseg, 0);
+}
+
+/* On a monochrome adapter the only legal attributes are normal (0x07),
+ * intense (0x0F), reverse (0x70) and the blink bit (0x80). The app's color
+ * attributes are remapped to those at write time so the rest of the code can
+ * keep using the color ATTR_* values unchanged.
+ *
+ * The app's canvas is white-on-blue (background nibble 1); on mono that is the
+ * *normal* background, so blue (and plain black) backgrounds map to normal
+ * text. Genuine highlight backgrounds (cyan cursor bar, gray status/menu/
+ * dialog, red error) map to reverse video. A non-white foreground on the
+ * canvas (yellow marks, green column headers, bright dialog highlight) becomes
+ * intense so it still stands out. The blink bit is preserved. */
+static unsigned char map_attr(unsigned char a)
+{
+    unsigned char bl, fg, bg;
+
+    if (!g_mono)
+        return a;
+
+    bl = (unsigned char)(a & 0x80);
+    fg = (unsigned char)(a & 0x0F);
+    bg = (unsigned char)((a >> 4) & 0x07);
+
+    if (bg == 0 || bg == 1) {                 /* black / blue canvas -> normal bg */
+        if (fg != 0x0F && fg >= 0x08)
+            return (unsigned char)(0x0F | bl);  /* bright color -> intense        */
+        return (unsigned char)(0x07 | bl);      /* white/dark text -> normal      */
+    }
+    return (unsigned char)(0x70 | bl);          /* highlight bg -> reverse video  */
 }
 
 /* -------------------------------------------------------------------------
  * Init / shutdown
  * ---------------------------------------------------------------------- */
-void tui_init(void)
+/* mono_pref: -1 = auto-detect, 0 = force color, 1 = force monochrome. */
+void tui_init(int mono_pref)
 {
     union REGS r;
 
-    /* Video mode 03h = 80x25 color text. Also resets the screen. */
+    if (mono_pref == 0) {
+        g_mono = 0;
+    } else if (mono_pref == 1) {
+        g_mono = 1;
+    } else {
+        /* Auto-detect: BIOS INT 10h AH=0Fh returns the current video mode in
+         * AL. Mode 7 = monochrome adapter (MDA/Hercules). */
+        r.h.ah = 0x0F;
+        int86(0x10, &r, &r);
+        g_mono = (r.h.al == 0x07) ? 1 : 0;
+    }
+
+    g_vidseg = g_mono ? VIDEO_SEG_MONO : VIDEO_SEG_COLOR;
+
+    /* Set 80x25 text mode (07h mono, 03h color). Also resets the screen. */
     r.h.ah = 0x00;
-    r.h.al = 0x03;
+    r.h.al = (unsigned char)(g_mono ? 0x07 : 0x03);
     int86(0x10, &r, &r);
 
     show_cursor(0);
@@ -65,7 +114,7 @@ void putchar_at(int row, int col, char ch, unsigned char attr)
     v = vidmem();
     offset = (row * SCREEN_COLS + col) * 2;
     v[offset]     = (unsigned char)ch;
-    v[offset + 1] = attr;
+    v[offset + 1] = map_attr(attr);
 }
 
 void putattr_at(int row, int col, unsigned char attr)
@@ -78,7 +127,7 @@ void putattr_at(int row, int col, unsigned char attr)
 
     v = vidmem();
     offset = (row * SCREEN_COLS + col) * 2;
-    v[offset + 1] = attr;
+    v[offset + 1] = map_attr(attr);
 }
 
 void fill_rect(int row, int col, int rows, int cols, char ch, unsigned char attr)
@@ -93,6 +142,7 @@ void fill_rect(int row, int col, int rows, int cols, char ch, unsigned char attr
     if (r2 > SCREEN_ROWS) r2 = SCREEN_ROWS;
     if (c2 > SCREEN_COLS) c2 = SCREEN_COLS;
 
+    attr = map_attr(attr);
     for (r = row; r < r2; r++) {
         unsigned char far *v = vidmem() + (r * SCREEN_COLS + col) * 2;
         for (c = col; c < c2; c++) {

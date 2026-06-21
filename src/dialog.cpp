@@ -153,7 +153,7 @@ void dlg_error(const char *title, const char *msg)
  * Yes/No prompt
  * ---------------------------------------------------------------------- */
 /* Yes/No prompt with a selectable default focus (file-internal; publicly
- * exposed only via dlg_confirm with the default set to "No"). */
+ * exposed only via dlg_confirm with the default set to "Yes"). */
 static int dlg_confirm_def(const char *title, const char *msg, int default_yes)
 {
     char lines[DLG_MAX_LINES][72];
@@ -211,7 +211,7 @@ static int dlg_confirm_def(const char *title, const char *msg, int default_yes)
 
 int dlg_confirm(const char *title, const char *msg)
 {
-    return dlg_confirm_def(title, msg, 0);   /* default: "No" */
+    return dlg_confirm_def(title, msg, 1);   /* default: "Yes" */
 }
 
 /* -------------------------------------------------------------------------
@@ -704,7 +704,7 @@ void dlg_splash(const char *version)
     { const char *_t = (text); int _l = (int)strlen(_t); \
       draw_text((row), (c) + 1 + (inner - _l) / 2, _t, (attr), _l); }
 
-    sprintf(titlebuf, "NCFTP386  v%s", version ? version : "");
+    sprintf(titlebuf, "FTP4DOS  v%s", version ? version : "");
 
     save_screen(dlg_screen);
 

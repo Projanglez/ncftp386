@@ -36,7 +36,7 @@
 #include "i18n.h"
 #include "umlaut.h"   /* always include last */
 
-#define APP_VERSION "0.9.1"
+#define APP_VERSION "0.9.2"
 
 /* ---- Screen layout ---- */
 #define PANEL_TOP     0
@@ -70,6 +70,8 @@ static int  g_savepw      = 1;   /* remember password (0 = host/user only)     *
 static int  g_saveconn    = 1;   /* 0 = do not save this session in NCFTP.SAV  */
 static int  g_autoconnect = 0;   /* auto-connect via command line (-h)         */
 static int  g_nosplash    = 0;   /* /Q: skip splash screen                     */
+static int  g_swapped     = 0;   /* Ctrl-U: local panel on the right (saved)   */
+static int  g_video_pref  = -1;  /* -1 auto, 0 force color, 1 force mono        */
 
 /* Critical-error handler (INT 24h): prevents the DOS "Abort, Retry, Fail?"
  * prompt - e.g. for an empty floppy drive. Instead of letting it wreck the
@@ -85,21 +87,40 @@ static int ncftp_harderr(unsigned deverr, unsigned errcode, unsigned *devhdr)
  * Screen chrome
  * ---------------------------------------------------------------------- */
 
-/* Function key labels per language. F7 = "MkDir" (same in both). */
+/* Function key labels per language. F6 = "Move", F7 = "MkDir". */
 static const char *fkey_label(int i)
 {
     static const char *de[10] = {
         "Hilfe", "Verb", "Anzeig", "Edit", "Kopier",
-        "Umben", "MkDir", "L" oe "sch", "Laufw", "Ende"
+        "Versch", "MkDir", "L" oe "sch", "Laufw", "Ende"
     };
     static const char *en[10] = {
         "Help", "Conn", "View", "Edit", "Copy",
-        "Ren",  "MkDir", "Del", "Drive", "Quit"
+        "Move", "MkDir", "Del", "Drive", "Quit"
     };
     return g_english ? en[i] : de[i];
 }
 
-static void draw_fkeybar(void)
+/* Alternate labels shown while ALT is held (Norton Commander style). Only the
+ * keys that have an ALT action are labelled; "" leaves the cell blank. */
+static const char *fkey_alt_label(int i)
+{
+    static const char *de[10] = {
+        "Laufw", "", "", "", "",
+        "Umben", "", "", "", ""
+    };
+    static const char *en[10] = {
+        "Drive", "", "", "", "",
+        "Rename", "", "", "", ""
+    };
+    return g_english ? en[i] : de[i];
+}
+
+/* Reflects whether the function-key bar currently shows the ALT labels, so
+ * the idle loop only repaints row 24 when the ALT state actually changes. */
+static int g_altbar = 0;
+
+static void draw_fkeybar(int alt)
 {
     int i;
     fill_rect(ROW_FKEYS, 0, 1, SCREEN_COLS, ' ', ATTR_FNKEY_LBL);
@@ -107,11 +128,13 @@ static void draw_fkeybar(void)
         int col = i * 8;            /* 10 cells of 8 columns = 80 */
         char num[4];
         int nlen;
+        const char *lbl = alt ? fkey_alt_label(i) : fkey_label(i);
         sprintf(num, "%d", i + 1);  /* 1..10 */
         nlen = (int)strlen(num);
-        draw_text(ROW_FKEYS, col,        num,          ATTR_FNKEY_NUM, nlen);
-        draw_text(ROW_FKEYS, col + nlen, fkey_label(i), ATTR_FNKEY_LBL, 8 - nlen);
+        draw_text(ROW_FKEYS, col,        num, ATTR_FNKEY_NUM, nlen);
+        draw_text(ROW_FKEYS, col + nlen, lbl, ATTR_FNKEY_LBL, 8 - nlen);
     }
+    g_altbar = alt;
 }
 
 /* "1234567" -> "1,234,567" (en) or "1.234.567" (de). out >= 20 characters. */
@@ -264,8 +287,30 @@ static void redraw_all(void)
     g_left.draw();
     g_right.draw();
     draw_statusbar();
-    draw_fkeybar();
+    draw_fkeybar(0);
     draw_clock();
+}
+
+/* Position the two panels. Normally the local panel is on the left and the
+ * remote panel on the right; when g_swapped is set they switch sides (the
+ * local HDD ends up on the right). Only the screen columns change - the panel
+ * objects (and thus copy direction / Tab handling) stay the same. */
+static void apply_panel_regions(void)
+{
+    int lcol = g_swapped ? PANEL_COLS : 0;          /* local panel column  */
+    int rcol = g_swapped ? 0          : PANEL_COLS; /* remote panel column */
+    g_left.set_region(PANEL_TOP, lcol, PANEL_ROWS, PANEL_COLS);
+    g_right.set_region(PANEL_TOP, rcol, PANEL_ROWS, PANEL_COLS);
+}
+
+/* Ctrl-U: swap the panels left<->right and remember the choice. */
+static void do_swap_panels(void)
+{
+    g_swapped = !g_swapped;
+    apply_panel_regions();
+    redraw_all();
+    if (g_saveconn)
+        connsave_store(g_host, g_portStr, g_user, g_pass, g_savepw, g_swapped);
 }
 
 /* Called when the FTP connection was lost while idle. */
@@ -325,7 +370,7 @@ static int perform_connect(void)
     g_right.refresh();
     set_active((Panel *)&g_right);
     if (g_saveconn)
-        connsave_store(g_host, g_portStr, g_user, g_pass, g_savepw);
+        connsave_store(g_host, g_portStr, g_user, g_pass, g_savepw, g_swapped);
     return FTP_OK;
 }
 
@@ -873,7 +918,84 @@ static void do_delete(void)
 }
 
 /* -------------------------------------------------------------------------
- * F6 - Rename (file or directory, local or remote)
+ * F6 - Move (copy to the other panel, then delete the source)
+ * Works on a single entry or a multi-selection, files and recursive
+ * directories, in both directions. Reuses the copy and delete machinery.
+ * A source is deleted only after its copy reported success, so a failed
+ * transfer never loses data. (Note: choosing "Skip" on an existing target
+ * still counts as success and removes that source - the same trade-off the
+ * underlying copy makes.)
+ * ---------------------------------------------------------------------- */
+static void do_move(void)
+{
+    PanelEntry *cur;
+    CopyCtx     cc;
+    int to_remote, src_remote, nmarked, total, i, rc, keepidx;
+    const char *destdir;
+    char q[140];
+
+    if (g_active == 0) return;
+
+    if (!g_ftp.is_connected()) {
+        dlg_error(L("Move", "Verschieben"),
+                  L("No FTP connection.\nConnect with F2 first.",
+                    "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
+        redraw_all();
+        return;
+    }
+
+    to_remote  = (g_active == (Panel *)&g_left);   /* local active -> upload     */
+    src_remote = !to_remote;                       /* delete sources on this side */
+    nmarked    = g_active->marked_count();
+    cur        = g_active->selected();
+    keepidx    = g_active->selected_index();
+
+    if (nmarked == 0) {
+        if (cur == 0 || cur->is_parent) { redraw_all(); return; }
+    }
+
+    total   = (nmarked > 0) ? nmarked : 1;
+    destdir = to_remote ? g_right.path() : g_left.path();
+
+    sprintf(q, L("Move %d item(s) to:\n%.40s",
+                 "%d Eintrag/Eintr" ae "ge verschieben nach:\n%.40s"), total, destdir);
+    if (!dlg_confirm(L("Move", "Verschieben"), q)) { redraw_all(); return; }
+
+    cc.overwrite_all = 0;              /* fresh per operation */
+
+    redraw_all();
+    dlg_progress_begin(L("Move", "Verschieben"), "");
+
+    rc = FTP_OK;
+    if (nmarked > 0) {
+        for (i = 0; i < g_active->entry_count(); i++) {
+            PanelEntry *e = g_active->entry_at(i);
+            if (!e || !e->marked || e->is_parent) continue;
+            rc = copy_one_entry(to_remote, e, &cc);
+            if (rc != FTP_OK) break;              /* keep source on failure/abort */
+            delete_one_recursive(src_remote, e);  /* copy ok -> remove source      */
+        }
+    } else {
+        rc = copy_one_entry(to_remote, cur, &cc);
+        if (rc == FTP_OK) delete_one_recursive(src_remote, cur);
+    }
+
+    dlg_progress_end();
+
+    if (rc != FTP_OK && rc != FTP_ERR_ABORT)
+        dlg_error(L("Move failed", "Verschieben fehlgeschlagen"), g_ftp.last_error());
+
+    g_active->clear_marks();
+    g_left.refresh();
+    g_right.refresh();
+    g_active->set_cursor_index(keepidx);
+    redraw_all();
+    if (rc == FTP_ERR_ABORT)
+        flash_status(L(" Move aborted.", " Verschieben abgebrochen."));
+}
+
+/* -------------------------------------------------------------------------
+ * Alt+F6 - Rename (file or directory, local or remote)
  * Plain rename within the same directory (no moving between panels).
  * ---------------------------------------------------------------------- */
 static void do_rename(void)
@@ -987,19 +1109,21 @@ static void do_drives(void)
 /* Brief help (/?) on stdout - runs before tui_init, so plain output. */
 static void print_usage(void)
 {
-    printf("NCFTP386 v" APP_VERSION " - Dual-Panel FTP Client for DOS\n");
-    printf("(c) 2026 Projanglez -- https://github.com/Projanglez/ncftp386\n\n");
-    printf("Usage: NCFTP386 [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/S:ALL|NOPASS|OFF] [/Q]\n");
+    printf("FTP4DOS v" APP_VERSION " - Dual-Panel FTP Client for DOS\n");
+    printf("(c) 2026 Projanglez -- https://github.com/Projanglez/ftp4dos\n\n");
+    printf("Usage: FTP4DOS [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/S:ALL|NOPASS|OFF] [/Q] [/MONO|/COLOR]\n");
     printf("       ('-' may be used instead of '/'; flags are case-insensitive)\n\n");
     printf("  /L:EN|DE        force English or German user interface\n");
     printf("  /H:HOST         connect to HOST automatically on startup\n");
     printf("  /P:PORT         port (default 21)\n");
     printf("  /U:USER         user name (default anonymous)\n");
     printf("  /W:PASS         password  (WARNING: stored in cleartext in the batch file)\n");
-    printf("  /S:ALL          save connection incl. password to NCFTP386.SAV (default)\n");
+    printf("  /S:ALL          save connection incl. password to FTP4DOS.SAV (default)\n");
     printf("  /S:NOPASS       save connection but not the password\n");
     printf("  /S:OFF          do not save this connection\n");
     printf("  /Q              skip splash screen\n");
+    printf("  /MONO           force monochrome display (MDA/Hercules)\n");
+    printf("  /COLOR          force color display (default: auto-detect)\n");
     printf("  /?              this help\n");
 }
 
@@ -1018,7 +1142,8 @@ int main(int argc, char *argv[])
      * g_host etc.; if the file is missing, the defaults remain. */
     connsave_init(argv[0]);
     connsave_load(g_host, (int)sizeof(g_host), g_portStr, (int)sizeof(g_portStr),
-                  g_user, (int)sizeof(g_user), g_pass, (int)sizeof(g_pass), &g_savepw);
+                  g_user, (int)sizeof(g_user), g_pass, (int)sizeof(g_pass),
+                  &g_savepw, &g_swapped);
 
     /* Parse the command line (overrides the loaded values). Uniform syntax
      * /X or /X:value; '-' is also allowed instead of '/'. The flag letter
@@ -1064,6 +1189,12 @@ int main(int argc, char *argv[])
             case 'q':
                 g_nosplash = 1;
                 break;
+            case 'm':       /* /MONO  : force monochrome (MDA/Hercules) */
+                g_video_pref = 1;
+                break;
+            case 'c':       /* /COLOR : force color adapter */
+                g_video_pref = 0;
+                break;
             case '?':
                 want_help = 1;
                 break;
@@ -1085,10 +1216,9 @@ int main(int argc, char *argv[])
     g_ftp_ready = (FtpClient::init_stack() == FTP_OK) ? 1 : 0;
     g_right.attach(&g_ftp);
 
-    tui_init();
+    tui_init(g_video_pref);
 
-    g_left.set_region(PANEL_TOP, 0,          PANEL_ROWS, PANEL_COLS);
-    g_right.set_region(PANEL_TOP, PANEL_COLS, PANEL_ROWS, PANEL_COLS);
+    apply_panel_regions();          /* honors g_swapped loaded from FTP4DOS.SAV */
     g_left.refresh();
     g_right.refresh();
     set_active((Panel *)&g_left);
@@ -1127,6 +1257,16 @@ int main(int argc, char *argv[])
          *  - send a NOOP every 60 s (keepalive against server idle timeout). */
         while (running && !key_pending()) {
             time_t now = time(0);
+
+            /* Norton-style ALT bar: while ALT is held, row 24 shows the
+             * alternate labels (Alt+F1 Drive, Alt+F6 Rename). BIOS keyboard
+             * flag at 0040:0017, bit 3 = ALT down. Only repaint on change. */
+            {
+                unsigned char far *kbflag = (unsigned char far *)MK_FP(0x0040, 0x0017);
+                int alt = (*kbflag & 0x08) ? 1 : 0;
+                if (alt != g_altbar) draw_fkeybar(alt);
+            }
+
             if (now != last_clock) { draw_clock(); last_clock = now; }
             if (g_ftp.is_connected()) {
                 if (!g_ftp.idle_drive()) {
@@ -1148,6 +1288,10 @@ int main(int argc, char *argv[])
             g_left.draw();
             g_right.draw();
             draw_statusbar();
+            break;
+
+        case KEY_CTRL_U:        /* swap panels left<->right (remembered) */
+            do_swap_panels();
             break;
 
         case KEY_UP:   g_active->move_step(-1); draw_statusbar(); break;
@@ -1194,38 +1338,39 @@ int main(int argc, char *argv[])
         /* Function keys. */
         case KEY_F1:
             dlg_message(L("Help", "Hilfe"),
-                L("Tab        Switch panel\n"
-                  "Insert     Mark item (copy/delete several)\n"
+                L("Tab        Switch panel    Ctrl+U  Swap panels\n"
+                  "Insert     Mark item (copy/move/delete several)\n"
                   "*          Invert selection\n"
                   "+          Mark files missing or different in other panel\n"
                   "Enter      Enter directory / view file\n"
                   "Backspace  Parent directory\n"
-                  "F2 Connect  F3 View  F4 Edit\n"
-                  "F5 Copy (recursive)  F6 Rename\n"
-                  "F7 MkDir  F8 Delete  F9 Drive  F10 Quit",
-                  "Tab        Panel wechseln\n"
-                  "Einfg      Eintrag markieren (mehrere kopieren/l" oe "schen)\n"
+                  "F2 Connect  F3 View  F4 Edit  F5 Copy (recursive)\n"
+                  "F6 Move (recursive)  Alt+F6 Rename\n"
+                  "F7 MkDir  F8 Delete  F9/Alt+F1 Drive  F10 Quit",
+                  "Tab        Panel wechseln   Strg+U  Panels tauschen\n"
+                  "Einfg      Eintrag markieren (mehrere kop./versch./l" oe "schen)\n"
                   "*          Markierung invertieren\n"
                   "+          Fehlende/abweichende Dateien gg. anderem Panel markieren\n"
                   "Enter      Verzeichnis betreten / Datei anzeigen\n"
                   "Backspace  " Ue "bergeordnetes Verzeichnis\n"
-                  "F2 Verbinden  F3 Anzeigen  F4 Bearbeiten\n"
-                  "F5 Kopieren (rekursiv)  F6 Umbenennen\n"
-                  "F7 MkDir  F8 L" oe "schen  F9 Laufwerk  F10 Ende"), 0);
+                  "F2 Verbinden  F3 Anzeigen  F4 Bearbeiten  F5 Kopieren\n"
+                  "F6 Verschieben (rekursiv)  Alt+F6 Umbenennen\n"
+                  "F7 MkDir  F8 L" oe "schen  F9/Alt+F1 Laufwerk  F10 Ende"), 0);
             break;
         case KEY_F2:  do_connect(); break;
         case KEY_F3:  do_view(); break;
         case KEY_F4:  do_edit(); break;
         case KEY_F5:  do_copy(); break;
-        case KEY_F6:  do_rename(); break;
+        case KEY_F6:  do_move(); break;
         case KEY_F7:  do_mkdir(); break;
         case KEY_F8:  do_delete(); break;
         case KEY_F9:  do_drives(); break;
         case KEY_ALT_F1: do_drives(); break;   /* secret: same as F9 (for NC veterans) */
+        case KEY_ALT_F6: do_rename(); break;   /* F6 is Move; rename moved to Alt+F6  */
 
         case KEY_F10:
             if (dlg_confirm(L("Quit", "Beenden"),
-                            L("Really quit NCFTP386?", "NCFTP386 wirklich beenden?")))
+                            L("Really quit FTP4DOS?", "FTP4DOS wirklich beenden?")))
                 running = 0;
             break;
 

@@ -19,7 +19,7 @@ void dlg_error(const char *title, const char *msg);   /* = dlg_message(...,1)  *
 
 /* Yes/No prompt. Returns: 1 = Yes, 0 = No.
  * Y/N as direct keys, Left/Right/Tab switches focus, Enter selects, Esc = No.
- * Default focus is on "No". */
+ * Default focus is on "Yes". */
 int dlg_confirm(const char *title, const char *msg);
 
 /* Single-line input field (basis for the connect dialog).

@@ -127,6 +127,11 @@ protected:
     void draw_entry_row(int idx);/* redraw just one entry row (idx)        */
     void format_entry(const PanelEntry *e, char *out, int inner) const;
     virtual unsigned char frame_attr() const;  /* border color (overridable) */
+    /* Display case convention: 1 = Norton style (UPPERCASE directories,
+     * lowercase files); 0 = show the name verbatim. The local panel keeps
+     * the Norton convention; the FTP panel overrides this to 0 because Unix
+     * servers are case-sensitive (see RemotePanel). */
+    virtual int nc_case() const;
 };
 
 #endif /* PANEL_H */

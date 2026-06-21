@@ -3,8 +3,8 @@
  * -----------------------------------------------------------------------------
  * Compiler: Open Watcom (wpp), Large Memory Model, 16-bit Real-Mode DOS.
  *
- * File format (text, editable), NCFTP.SAV next to the EXE:
- *     # NCFTP386 saved connection
+ * File format (text, editable), FTP4DOS.SAV next to the EXE:
+ *     # FTP4DOS saved connection
  *     host=ftp.example.org
  *     port=21
  *     user=anonymous
@@ -36,7 +36,7 @@ void connsave_init(const char *argv0)
 
     if (drive[0] || dir[0]) {
         /* EXE's directory; _splitpath returns dir including a trailing '\'. */
-        _makepath(g_path, drive, dir, "NCFTP386", "SAV");
+        _makepath(g_path, drive, dir, "FTP4DOS", "SAV");
         return;
     }
 
@@ -47,9 +47,9 @@ void connsave_init(const char *argv0)
         if (getcwd(cwd, sizeof(cwd)) == 0) strcpy(cwd, ".");
         n = (int)strlen(cwd);
         if (n > 0 && (cwd[n - 1] == '\\' || cwd[n - 1] == '/'))
-            sprintf(g_path, "%sNCFTP386.SAV", cwd);
+            sprintf(g_path, "%sFTP4DOS.SAV", cwd);
         else
-            sprintf(g_path, "%s\\NCFTP386.SAV", cwd);
+            sprintf(g_path, "%s\\FTP4DOS.SAV", cwd);
     }
 }
 
@@ -94,7 +94,8 @@ static void deobfus_hex(const char *hex, char *dst, int dstsz)
 /* Load                                                                 */
 /* ------------------------------------------------------------------ */
 int connsave_load(char *host, int hostsz, char *port, int portsz,
-                  char *user, int usersz, char *pass, int passsz, int *savepw)
+                  char *user, int usersz, char *pass, int passsz,
+                  int *savepw, int *swap)
 {
     FILE *f;
     char  line[256];
@@ -120,6 +121,7 @@ int connsave_load(char *host, int hostsz, char *port, int portsz,
         else if (stricmp(key, "port") == 0) { strncpy(port, val, portsz - 1); port[portsz - 1] = 0; }
         else if (stricmp(key, "user") == 0) { strncpy(user, val, usersz - 1); user[usersz - 1] = 0; }
         else if (stricmp(key, "savepw") == 0) { if (savepw) *savepw = atoi(val) ? 1 : 0; }
+        else if (stricmp(key, "swap") == 0) { if (swap) *swap = atoi(val) ? 1 : 0; }
         else if (stricmp(key, "pass") == 0) { if (val[0]) deobfus_hex(val, pass, passsz); }
     }
 
@@ -131,7 +133,7 @@ int connsave_load(char *host, int hostsz, char *port, int portsz,
 /* Save                                                                 */
 /* ------------------------------------------------------------------ */
 void connsave_store(const char *host, const char *port,
-                    const char *user, const char *pass, int savepw)
+                    const char *user, const char *pass, int savepw, int swap)
 {
     FILE *f;
 
@@ -139,11 +141,12 @@ void connsave_store(const char *host, const char *port,
     f = fopen(g_path, "w");
     if (!f) return;
 
-    fprintf(f, "# NCFTP386 saved connection\n");
+    fprintf(f, "# FTP4DOS saved connection\n");
     fprintf(f, "host=%s\n", host ? host : "");
     fprintf(f, "port=%s\n", port ? port : "");
     fprintf(f, "user=%s\n", user ? user : "");
     fprintf(f, "savepw=%d\n", savepw ? 1 : 0);
+    fprintf(f, "swap=%d\n", swap ? 1 : 0);
 
     if (savepw && pass && pass[0]) {
         char hex[2 * 64 + 1];

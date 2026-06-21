@@ -40,6 +40,10 @@ public:
     const char *last_error() const { return ftp ? ftp->last_error() : ""; }
 
 private:
+    /* FTP servers (Unix) are case-sensitive: show names verbatim instead of
+     * forcing the Norton UPPERCASE-dir / lowercase-file convention. */
+    int nc_case() const { return 0; }
+
     FtpClient *ftp;
     char cwd[PANEL_HEADER_MAX];  /* current remote path (via PWD)              */
     int  navFailed;             /* 1 = the last action reported an error       */

@@ -101,6 +101,12 @@ unsigned char Panel::frame_attr() const
     return ATTR_BORDER;
 }
 
+/* Base panels (local DOS filesystem) use the Norton case convention. */
+int Panel::nc_case() const
+{
+    return 1;
+}
+
 /* Default actions: no-op. Subclasses override. */
 int  Panel::enter_selected() { return 0; }
 void Panel::go_parent()      { }
@@ -297,11 +303,17 @@ void Panel::format_entry(const PanelEntry *e, char *out, int inner) const
     for (i = 0; i < inner; i++) out[i] = ' ';
     out[inner] = '\0';
 
-    /* Name: directories UPPERCASE, files lowercase. */
-    for (i = 0; e->name[i] && i < PANEL_NAME_MAX - 1; i++)
-        dispname[i] = (char)(e->is_dir
-                             ? toupper((unsigned char)e->name[i])
-                             : tolower((unsigned char)e->name[i]));
+    /* Name: Norton convention (directories UPPERCASE, files lowercase) unless
+     * the panel preserves the original case (FTP panel: case-sensitive Unix). */
+    if (nc_case()) {
+        for (i = 0; e->name[i] && i < PANEL_NAME_MAX - 1; i++)
+            dispname[i] = (char)(e->is_dir
+                                 ? toupper((unsigned char)e->name[i])
+                                 : tolower((unsigned char)e->name[i]));
+    } else {
+        for (i = 0; e->name[i] && i < PANEL_NAME_MAX - 1; i++)
+            dispname[i] = e->name[i];
+    }
     dispname[i] = '\0';
     place(out, c.name_off, dispname, c.name_w, 0);
 

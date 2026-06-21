@@ -56,7 +56,11 @@
 #define BOX_S_TRIGHT 0xB4  /* T pointing left  */
 
 /* ---- Init / shutdown ---- */
-void tui_init(void);       /* force 80x25 text mode, hide the cursor          */
+/* mono_pref: -1 = auto-detect adapter, 0 = force color, 1 = force monochrome.
+ * Sets 80x25 text mode (07h mono / 03h color), picks the video segment, hides
+ * the cursor. On a mono adapter the color ATTR_* values are remapped to the
+ * legal monochrome attributes automatically. */
+void tui_init(int mono_pref);
 void tui_shutdown(void);   /* show the cursor again, clear screen normally    */
 
 /* ---- Basic output routines (direct video memory access) ---- */

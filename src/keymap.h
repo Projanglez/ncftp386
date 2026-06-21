@@ -16,6 +16,7 @@
 #define KEY_TAB     0x09
 #define KEY_BACKSP  0x08
 #define KEY_SPACE   0x20
+#define KEY_CTRL_U  0x15  /* swap panels left<->right (Norton Ctrl-U)            */
 
 /* ---- Extended keys (0x100 | scancode) ---- */
 #define KEY_UP      0x148
@@ -39,8 +40,10 @@
 #define KEY_F9      0x143
 #define KEY_F10     0x144
 
-/* Alt+function keys (hidden shortcuts). Alt+F1 returns scan code 0x68. */
+/* Alt+function keys. Alt+F1..F10 return scan codes 0x68..0x71.
+ * Alt+F1 = change drive, Alt+F6 = rename (F6 itself is Move). */
 #define KEY_ALT_F1  0x168
+#define KEY_ALT_F6  0x16D
 
 /* Numpad keys: unused in the panel context, Norton Commander style.
  * Numpad * and + are ASCII and indistinguishable from the like-named keys. */
