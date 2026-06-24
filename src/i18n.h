@@ -12,6 +12,12 @@
 
 extern int g_english;          /* 0 = German, 1 = English */
 
+/* Classic binary size units (1 KB = 1024 bytes). Used by every on-screen size
+ * formatter so they cannot drift apart. Labels stay KB/MB/GB (never KiB/MiB). */
+#define SZ_KB  1024UL
+#define SZ_MB  1048576UL          /* 1024 * 1024            */
+#define SZ_GB  1073741824UL       /* 1024 * 1024 * 1024     */
+
 /* Regional number/date formatting, read from the DOS country block
  * (INT 21h/38h) at startup. Used for every on-screen size, date and time so
  * the display follows COUNTRY= in CONFIG.SYS (e.g. NL: "1.000.000", dd-mm-yy).

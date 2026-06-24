@@ -43,26 +43,26 @@ static void columns(int inner, ColLayout *c)
 
 /* Format a file size for the narrow 9-character panel column.
  *   <= 9,999,999 : full digits grouped with the locale thousands separator
- *   10 MB ..<1 GB: decimal megabytes, e.g. "10.0M" / "100M" / "954M"
- *   >= 1 GB      : decimal gigabytes, e.g. "1.0G" / "4.0G"
- * M/G are decimal (1000-based) units so the value matches the file's "GB"
- * name; the result is always <= 6 chars and never overflows the column.
+ *   10 MB ..<1 GB: binary megabytes, e.g. "10.0M" / "100M" / "954M"
+ *   >= 1 GB      : binary gigabytes, e.g. "1.0G" / "4.0G"
+ * M/G are binary (1024-based) units so the value matches every other size in
+ * the app; the result is always <= 6 chars and never overflows the column.
  * The decimal point uses the locale separator (e.g. NL: "1,0G"). */
 static void fmt_size(char *buf, unsigned long n)
 {
     char raw[16];
     int  len, i, pos;
 
-    if (n >= 1000000000UL) {                       /* gigabytes */
-        unsigned long whole = n / 1000000000UL;
-        unsigned long frac  = (n % 1000000000UL) / 100000000UL;  /* 1st decimal */
+    if (n >= SZ_GB) {                              /* gigabytes */
+        unsigned long whole = n / SZ_GB;
+        unsigned long frac  = (n % SZ_GB) / (SZ_GB / 10UL);      /* 1st decimal */
         sprintf(buf, "%lu%c%luG", whole, g_locale.decimal_sep, frac);
         return;
     }
     if (n > 9999999UL) {                            /* megabytes */
-        unsigned long mb = n / 1000000UL;
+        unsigned long mb = n / SZ_MB;
         if (mb < 100UL) {
-            unsigned long frac = (n % 1000000UL) / 100000UL;     /* 1st decimal */
+            unsigned long frac = (n % SZ_MB) / (SZ_MB / 10UL);   /* 1st decimal */
             sprintf(buf, "%lu%c%luM", mb, g_locale.decimal_sep, frac);
         } else {
             sprintf(buf, "%luM", mb);

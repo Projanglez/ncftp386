@@ -37,7 +37,7 @@
 #include "i18n.h"
 #include "umlaut.h"   /* always include last */
 
-#define APP_VERSION "0.9.4"
+#define APP_VERSION "0.9.4a"
 
 /* ---- Screen layout ---- */
 #define PANEL_TOP     0
@@ -107,11 +107,11 @@ static const char *fkey_label(int i)
 static const char *fkey_alt_label(int i)
 {
     static const char *de[10] = {
-        "Laufw", "", "Sort", "", "",
+        "Laufw", "Detail", "Sort", "", "Aktual",
         "Umben", "", "", "Pr" ue "fsum", ""
     };
     static const char *en[10] = {
-        "Drive", "", "Sort", "", "",
+        "Drive", "Detail", "Sort", "", "Refresh",
         "Rename", "", "", "ChkSum", ""
     };
     return g_english ? en[i] : de[i];
@@ -156,11 +156,10 @@ static void format_thousands(unsigned long v, char *out)
 static void format_human(unsigned long bytes, char *out)
 {
     char dec = g_locale.decimal_sep;
-    unsigned long kb = bytes / 1024UL;
+    unsigned long kb = bytes / SZ_KB;
     if (kb > 1000UL) {
-        unsigned long MB    = 1048576UL;
-        unsigned long whole = bytes / MB;
-        unsigned long frac  = (bytes % MB) * 10UL / MB;
+        unsigned long whole = bytes / SZ_MB;
+        unsigned long frac  = (bytes % SZ_MB) * 10UL / SZ_MB;
         sprintf(out, "(%lu%c%lu MB)", whole, dec, frac);
     } else {
         sprintf(out, "(%lu KB)", kb);
@@ -1021,6 +1020,58 @@ static void do_checksum(void)
     redraw_all();
 }
 
+/* Format n as a decimal count of 'unit' bytes with one fractional digit, using
+ * the locale decimal separator (e.g. "576,7"). Overflow-safe for GB. */
+static void fmt_unit(unsigned long n, unsigned long unit, char *out)
+{
+    unsigned long whole = n / unit;
+    unsigned long rem   = n % unit;
+    unsigned long frac;
+    if (unit >= 100000000UL) frac = rem / (unit / 10UL);   /* GB: avoid rem*10 overflow */
+    else                     frac = rem * 10UL / unit;      /* KB/MB: more precise        */
+    if (frac > 9) frac = 9;
+    sprintf(out, "%lu%c%lu", whole, g_locale.decimal_sep, frac);
+}
+
+/* -------------------------------------------------------------------------
+ * Alt+F2 - Detail: full name + size (Bytes/KB/MB/GB) of the selected entry.
+ * The panel column truncates long FTP names; this shows the complete name.
+ * ---------------------------------------------------------------------- */
+static void do_detail(void)
+{
+    PanelEntry *e;
+    char msg[300];
+
+    if (g_active == 0) return;
+    e = g_active->selected();
+    if (e == 0 || e->is_parent) { redraw_all(); return; }
+
+    if (e->is_dir) {
+        sprintf(msg, "Name: %.39s\n\n  <DIR>", e->name);
+    } else {
+        char nbytes[24], kb[24], mb[24], gb[24];
+        format_thousands(e->size, nbytes);
+        fmt_unit(e->size, SZ_KB, kb);
+        fmt_unit(e->size, SZ_MB, mb);
+        fmt_unit(e->size, SZ_GB, gb);
+        sprintf(msg, "Name: %.39s\n\n  Bytes: %s\n     KB: %s\n     MB: %s\n     GB: %s",
+                e->name, nbytes, kb, mb, gb);
+    }
+    dlg_message(L("File details", "Dateidetails"), msg, 0);
+    redraw_all();
+}
+
+/* -------------------------------------------------------------------------
+ * Alt+F5 - Refresh: re-read the active panel (e.g. to see a new remote file).
+ * ---------------------------------------------------------------------- */
+static void do_refresh(void)
+{
+    if (g_active == 0) return;
+    g_active->refresh();   /* remote: re-LISTs over FTP; local: re-reads the dir */
+    redraw_all();
+    flash_status(L(" Refreshed.", " Aktualisiert."));
+}
+
 /* -------------------------------------------------------------------------
  * F4 - Edit file (local only)
  * ---------------------------------------------------------------------- */
@@ -1765,7 +1816,9 @@ int main(int argc, char *argv[])
         case KEY_F8:  do_delete(); break;
         case KEY_F9:  do_drives(); break;
         case KEY_ALT_F1: do_drives(); break;   /* secret: same as F9 (for NC veterans) */
+        case KEY_ALT_F2: do_detail(); break;   /* full name + size of selected entry  */
         case KEY_ALT_F3: do_sort(); break;     /* sort dialog for the active panel    */
+        case KEY_ALT_F5: do_refresh(); break;  /* re-read the active panel            */
         case KEY_ALT_F6: do_rename(); break;   /* F6 is Move; rename moved to Alt+F6  */
         case KEY_ALT_F9: do_checksum(); break; /* CRC32 + MD5 of the selected file    */
 

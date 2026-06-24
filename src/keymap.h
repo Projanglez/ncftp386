@@ -43,7 +43,9 @@
 /* Alt+function keys. Alt+F1..F10 return scan codes 0x68..0x71.
  * Alt+F1 = change drive, Alt+F6 = rename (F6 itself is Move). */
 #define KEY_ALT_F1  0x168
+#define KEY_ALT_F2  0x169  /* file detail popup (full name + Bytes/KB/MB/GB)     */
 #define KEY_ALT_F3  0x16A  /* open the sort dialog for the active panel          */
+#define KEY_ALT_F5  0x16C  /* re-read (refresh) the active panel                 */
 #define KEY_ALT_F6  0x16D
 #define KEY_ALT_F9  0x170  /* checksum (CRC32 + MD5) of the selected file        */
 

@@ -308,12 +308,15 @@ int RemotePanel::refresh()
 
     curYear = current_year();
 
-    /* Always offer a ".." entry. */
+    /* Offer a ".." entry unless we are already at the root directory. */
     {
-        PanelEntry *e = &entries[count++];
-        strcpy(e->name, "..");
-        e->size = 0; e->date = 0; e->time = 0;
-        e->is_dir = 1; e->is_parent = 1; e->marked = 0;
+        int at_root = (cwd[0] == '\0') || (cwd[0] == '/' && cwd[1] == '\0');
+        if (!at_root) {
+            PanelEntry *e = &entries[count++];
+            strcpy(e->name, "..");
+            e->size = 0; e->date = 0; e->time = 0;
+            e->is_dir = 1; e->is_parent = 1; e->marked = 0;
+        }
     }
 
     int rc = ftp->list(0, on_line, this);

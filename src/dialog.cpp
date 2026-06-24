@@ -451,11 +451,11 @@ static void prog_draw_bar(int row, long pct)
 static void format_rate(unsigned long bps, char *out)
 {
     char dec = g_locale.decimal_sep;
-    if (bps >= 1048576UL)
-        sprintf(out, "%lu%c%luM/s", bps / 1048576UL,
-                dec, (bps % 1048576UL) * 10UL / 1048576UL);
-    else if (bps >= 1024UL)
-        sprintf(out, "%luK/s", bps / 1024UL);
+    if (bps >= SZ_MB)
+        sprintf(out, "%lu%c%luM/s", bps / SZ_MB,
+                dec, (bps % SZ_MB) * 10UL / SZ_MB);
+    else if (bps >= SZ_KB)
+        sprintf(out, "%luK/s", bps / SZ_KB);
     else
         sprintf(out, "%luB/s", bps);
 }
@@ -470,16 +470,16 @@ static void format_eta(long sec, char *out)
         sprintf(out, "%02ld:%02ld", sec / 60L, sec % 60L);
 }
 
-/* bytes -> compact decimal "12.5M" / "999K" / "512" (1000-based). */
+/* bytes -> compact "12.5M" / "999K" / "512" (binary, 1024-based). */
 static void format_bytes_compact(unsigned long n, char *out)
 {
     char dec = g_locale.decimal_sep;
-    if (n >= 1000000000UL)
-        sprintf(out, "%lu%c%luG", n / 1000000000UL, dec, (n % 1000000000UL) / 100000000UL);
-    else if (n >= 1000000UL)
-        sprintf(out, "%lu%c%luM", n / 1000000UL, dec, (n % 1000000UL) / 100000UL);
-    else if (n >= 1000UL)
-        sprintf(out, "%luK", n / 1000UL);
+    if (n >= SZ_GB)
+        sprintf(out, "%lu%c%luG", n / SZ_GB, dec, (n % SZ_GB) / (SZ_GB / 10UL));
+    else if (n >= SZ_MB)
+        sprintf(out, "%lu%c%luM", n / SZ_MB, dec, (n % SZ_MB) / (SZ_MB / 10UL));
+    else if (n >= SZ_KB)
+        sprintf(out, "%luK", n / SZ_KB);
     else
         sprintf(out, "%lu", n);
 }
