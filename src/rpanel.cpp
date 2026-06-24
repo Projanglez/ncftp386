@@ -73,13 +73,19 @@ static unsigned make_time(int hh, int mm)
 }
 
 /* Copy a name: up to PANEL_NAME_MAX, trims trailing CR/LF/space. */
-static void copy_name(char *dst, const char *src)
+/* Copy up to 'cap' characters of a name, trimming trailing whitespace. */
+static void copy_name_cap(char *dst, const char *src, int cap)
 {
     int n = 0;
-    while (src[n] && n < PANEL_NAME_MAX - 1) { dst[n] = src[n]; n++; }
+    while (src[n] && n < cap) { dst[n] = src[n]; n++; }
     while (n > 0 && (dst[n - 1] == ' ' || dst[n - 1] == '\r' || dst[n - 1] == '\n' || dst[n - 1] == '\t'))
         n--;
     dst[n] = '\0';
+}
+
+static void copy_name(char *dst, const char *src)
+{
+    copy_name_cap(dst, src, PANEL_NAME_MAX - 1);
 }
 
 /* Copy a token into a small buffer (NUL-terminated). */
@@ -133,12 +139,31 @@ RemotePanel::RemotePanel()
     cwd[0] = '\0';
     navFailed = 0;
     curYear = 1980;
+    namePool = 0;
+    poolUsed = 0;
+    poolSize = 0;
+}
+
+/* Size of the per-listing full-name pool. 512 entries average well under this;
+ * if a (pathological) listing overflows it, the extra names simply fall back to
+ * their truncated form - no crash, same as the pre-pool behavior. */
+#define REMOTE_NAME_POOL 32768U
+
+char *RemotePanel::pool_store(const char *s)
+{
+    unsigned len = (unsigned)strlen(s) + 1;
+    if (!namePool || poolUsed + len > poolSize) return 0;
+    char *dst = namePool + poolUsed;
+    memcpy(dst, s, len);
+    poolUsed += len;
+    return dst;
 }
 
 /* ------------------------------------------------------------------ */
 /* Unix "ls -l" format                                                 */
 /* ------------------------------------------------------------------ */
-static int parse_unix(const char *line, int curYear, PanelEntry *e)
+static int parse_unix(const char *line, int curYear, PanelEntry *e,
+                      char *full, int fullcap)
 {
     char c0 = line[0];
     if (!strchr("-dlbcps", c0)) return 0;       /* not a permission block */
@@ -188,11 +213,16 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
     /* Name = from token m+3 onward (rest of the line, may contain spaces). */
     const char *nm = line + off[m + 3];
     copy_name(e->name, nm);
+    if (full && fullcap > 0) copy_name_cap(full, nm, fullcap - 1);
 
     /* Symlink: "name -> target" -> keep only the name. */
     if (isLink) {
         char *arrow = strstr(e->name, " -> ");
         if (arrow) *arrow = '\0';
+        if (full && fullcap > 0) {
+            arrow = strstr(full, " -> ");
+            if (arrow) *arrow = '\0';
+        }
     }
 
     e->size      = size;
@@ -206,7 +236,7 @@ static int parse_unix(const char *line, int curYear, PanelEntry *e)
 /* ------------------------------------------------------------------ */
 /* MS-DOS / IIS format                                                 */
 /* ------------------------------------------------------------------ */
-static int parse_dos(const char *line, PanelEntry *e)
+static int parse_dos(const char *line, PanelEntry *e, char *full, int fullcap)
 {
     if (!isdigit((unsigned char)line[0])) return 0;
     if (line[2] != '-' && line[2] != '/') return 0;       /* date MM-DD-.. */
@@ -242,6 +272,7 @@ static int parse_dos(const char *line, PanelEntry *e)
     unsigned long size = isDir ? 0UL : strtoul(sz, 0, 10);
 
     copy_name(e->name, line + off[3]);
+    if (full && fullcap > 0) copy_name_cap(full, line + off[3], fullcap - 1);
     e->size      = size;
     e->date      = make_date(yr, mo, da);
     e->time      = make_time(hh, mm);
@@ -253,11 +284,14 @@ static int parse_dos(const char *line, PanelEntry *e)
 /* ------------------------------------------------------------------ */
 /* Public parser (Unix or DOS format)                                  */
 /* ------------------------------------------------------------------ */
-int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e)
+int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e,
+                        char *full, int fullcap)
 {
-    e->marked = 0;
-    if (parse_unix(line, curYear, e)) return 1;
-    if (parse_dos(line, e))           return 1;
+    e->marked   = 0;
+    e->fullname = 0;
+    if (full && fullcap > 0) full[0] = '\0';
+    if (parse_unix(line, curYear, e, full, fullcap)) return 1;
+    if (parse_dos(line, e, full, fullcap))           return 1;
     return 0;
 }
 
@@ -274,12 +308,19 @@ void RemotePanel::add_line(const char *line)
     if (count >= PANEL_MAX_ENTRIES) return;
 
     PanelEntry tmp;
-    if (!ftp_parse_list_line(line, curYear, &tmp)) return;          /* not parseable */
+    char full[FTP_LINE_MAX];
+    if (!ftp_parse_list_line(line, curYear, &tmp, full, (int)sizeof(full)))
+        return;                                                     /* not parseable */
 
     /* Discard "." and ".." from the listing (we add ".." ourselves). */
     if (tmp.name[0] == '\0') return;
     if (tmp.name[0] == '.' && tmp.name[1] == '\0') return;
     if (tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0') return;
+
+    /* Keep the full name only when it was actually truncated into tmp.name;
+     * otherwise tmp.name already is the complete name and fullname stays 0. */
+    if (strcmp(full, tmp.name) != 0)
+        tmp.fullname = pool_store(full);
 
     entries[count++] = tmp;
 }
@@ -308,6 +349,13 @@ int RemotePanel::refresh()
 
     curYear = current_year();
 
+    /* (Re)use the full-name pool for this listing. Allocated once, lazily. */
+    if (namePool == 0) {
+        namePool = (char *)malloc(REMOTE_NAME_POOL);
+        poolSize = namePool ? REMOTE_NAME_POOL : 0;
+    }
+    poolUsed = 0;
+
     /* Offer a ".." entry unless we are already at the root directory. */
     {
         int at_root = (cwd[0] == '\0') || (cwd[0] == '/' && cwd[1] == '\0');
@@ -316,6 +364,7 @@ int RemotePanel::refresh()
             strcpy(e->name, "..");
             e->size = 0; e->date = 0; e->time = 0;
             e->is_dir = 1; e->is_parent = 1; e->marked = 0;
+            e->fullname = 0;
         }
     }
 

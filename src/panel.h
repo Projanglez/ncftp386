@@ -25,6 +25,11 @@
 /* A directory entry (POD - re-sortable via qsort). */
 struct PanelEntry {
     char          name[PANEL_NAME_MAX];
+    /* Full (untruncated) name for entries whose real name exceeds 'name'.
+     * Points into the owning panel's name pool (RemotePanel); 0 when the
+     * name already fits in 'name' (always so for the local 8.3 panel). The
+     * pool is stable across qsort, so this pointer survives sorting. */
+    char         *fullname;
     unsigned long size;       /* size in bytes (0 for directories)            */
     unsigned      date;       /* DOS date word (bits: YYYYYYY MMMM DDDDD)     */
     unsigned      time;       /* DOS time word (bits: HHHHH MMMMMM SSSSS)     */
@@ -32,6 +37,14 @@ struct PanelEntry {
     unsigned char is_parent;  /* 1 = ".." entry (always sorted first)         */
     unsigned char marked;     /* 1 = marked by the user (Insert key)          */
 };
+
+/* The name to use when talking to the server / opening the real file: the full
+ * name when present, otherwise the (short) display name. Display and sorting
+ * keep using e->name directly. */
+inline const char *entry_name(const PanelEntry *e)
+{
+    return e->fullname ? e->fullname : e->name;
+}
 
 class Panel {
 public:

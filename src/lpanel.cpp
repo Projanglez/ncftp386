@@ -55,6 +55,7 @@ int LocalPanel::refresh()
             PanelEntry *e = &entries[count];
             strncpy(e->name, ff.name, PANEL_NAME_MAX - 1);
             e->name[PANEL_NAME_MAX - 1] = '\0';
+            e->fullname  = 0;             /* 8.3 names always fit in 'name' */
             e->size      = ff.size;
             e->date      = ff.wr_date;
             e->time      = ff.wr_time;

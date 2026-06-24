@@ -17,10 +17,12 @@
 
 /* Parse one raw LIST line into a PanelEntry (Unix or DOS/IIS format).
  * curYear supplies the year for lines that only carry a time (no year).
- * Returns 1 = recognized (e filled in: name, size, date, is_dir, marked=0),
- *         0 = line not recognizable as an entry. Also used by the recursive
- * directory download (dircopy.cpp). */
-int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e);
+ * 'full'/'fullcap' (optional) receive the untruncated name; pass 0 to ignore.
+ * Returns 1 = recognized (e filled in: name, size, date, is_dir, marked=0,
+ *         fullname=0), 0 = line not recognizable as an entry. Also used by the
+ * recursive directory download (dircopy.cpp). */
+int ftp_parse_list_line(const char *line, int curYear, PanelEntry *e,
+                        char *full = 0, int fullcap = 0);
 
 class RemotePanel : public Panel {
 public:
@@ -48,6 +50,17 @@ private:
     char cwd[PANEL_HEADER_MAX];  /* current remote path (via PWD)              */
     int  navFailed;             /* 1 = the last action reported an error       */
     int  curYear;               /* current year (for date lines with a time)  */
+
+    /* Pool of full (untruncated) names for the current listing. PanelEntry
+     * records point into it via 'fullname'. Allocated lazily, reused (reset)
+     * on every refresh; stable while the listing lives, so the pointers in
+     * entries[] stay valid across sort_entries(). */
+    char    *namePool;
+    unsigned poolUsed;
+    unsigned poolSize;
+    /* Copy 's' into the pool; returns a pointer into it, or 0 if it doesn't
+     * fit (caller then leaves fullname=0 and falls back to the short name). */
+    char *pool_store(const char *s);
 
     /* LIST callback (ftpcli calls this for every raw line). */
     static void on_line(void *ctx, const char *line);

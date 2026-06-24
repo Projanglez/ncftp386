@@ -37,7 +37,7 @@
 #include "i18n.h"
 #include "umlaut.h"   /* always include last */
 
-#define APP_VERSION "0.9.4a"
+#define APP_VERSION "0.9.5"
 
 /* ---- Screen layout ---- */
 #define PANEL_TOP     0
@@ -93,11 +93,11 @@ static const char *fkey_label(int i)
 {
     static const char *de[10] = {
         "Hilfe", "Verb", "Anzeig", "Edit", "Kopier",
-        "Versch", "MkDir", "L" oe "sch", "Laufw", "Ende"
+        "Versch", "MkDir", "L" oe "sch", "Aktual", "Ende"
     };
     static const char *en[10] = {
         "Help", "Conn", "View", "Edit", "Copy",
-        "Move", "MkDir", "Del", "Drive", "Quit"
+        "Move", "MkDir", "Del", "Refresh", "Quit"
     };
     return g_english ? en[i] : de[i];
 }
@@ -107,11 +107,11 @@ static const char *fkey_label(int i)
 static const char *fkey_alt_label(int i)
 {
     static const char *de[10] = {
-        "Laufw", "Detail", "Sort", "", "Aktual",
+        "Laufw", "Detail", "Sort", "", "",
         "Umben", "", "", "Pr" ue "fsum", ""
     };
     static const char *en[10] = {
-        "Drive", "Detail", "Sort", "", "Refresh",
+        "Drive", "Detail", "Sort", "", "",
         "Rename", "", "", "ChkSum", ""
     };
     return g_english ? en[i] : de[i];
@@ -675,7 +675,7 @@ static void copy_single_file_interactive(int to_remote, PanelEntry *e)
         dlg_progress_begin(L("Download", "Download"), 0);
         dlg_progress_setfile(e->name, 1, 1);
         copyctx_file_start(&cc);
-        rc = g_ftp.retr(e->name, target, copy_progress, &cc);
+        rc = g_ftp.retr(entry_name(e), target, copy_progress, &cc);
         dlg_progress_end();
 
         if (rc == FTP_ERR_ABORT)   abortmsg = L(" Download aborted.", " Download abgebrochen.");
@@ -737,7 +737,7 @@ static int copy_one_entry(int to_remote, PanelEntry *e, CopyCtx *cc)
         return g_ftp.stor(localpath, e->name, copy_progress, cc);
     } else {
         if (e->is_dir)
-            return dircopy_download(&g_ftp, e->name, localpath,
+            return dircopy_download(&g_ftp, entry_name(e), localpath,
                                     copy_item, copy_progress, copy_conflict, cc);
         /* Single file: does it already exist locally? */
         if (local_exists(localpath)) {
@@ -746,7 +746,7 @@ static int copy_one_entry(int to_remote, PanelEntry *e, CopyCtx *cc)
             if (d == DC_SKIP)  return FTP_OK;
         }
         copy_item(cc, e->name, 0);
-        return g_ftp.retr(e->name, localpath, copy_progress, cc);
+        return g_ftp.retr(entry_name(e), localpath, copy_progress, cc);
     }
 }
 
@@ -902,7 +902,7 @@ static void do_view(void)
         dlg_progress_begin(L("View", "Anzeigen"), 0);
         dlg_progress_setfile(e->name, 1, 1);
         copyctx_file_start(&cc);
-        rc = g_ftp.retr(e->name, path, copy_progress, &cc);
+        rc = g_ftp.retr(entry_name(e), path, copy_progress, &cc);
         dlg_progress_end();
         if (rc != FTP_OK) {
             remove(path);   /* clean up any partially started temp file */
@@ -963,7 +963,7 @@ static void do_checksum(void)
         dlg_progress_begin(L("Checksum", "Pr" ue "fsumme"), 0);
         dlg_progress_setfile(e->name, 1, 1);
         copyctx_file_start(&cc);
-        rc = g_ftp.retr(e->name, path, copy_progress, &cc);
+        rc = g_ftp.retr(entry_name(e), path, copy_progress, &cc);
         dlg_progress_end();
         if (rc != FTP_OK) {
             remove(path);   /* clean up any partial temp file */
@@ -1040,29 +1040,42 @@ static void fmt_unit(unsigned long n, unsigned long unit, char *out)
 static void do_detail(void)
 {
     PanelEntry *e;
-    char msg[300];
+    char msg[600];
+    char wrapped[300];
 
     if (g_active == 0) return;
     e = g_active->selected();
     if (e == 0 || e->is_parent) { redraw_all(); return; }
 
+    /* Show the full name (may exceed the panel column), wrapped to fit the
+     * dialog: break it into <=60-char chunks on their own lines. */
+    {
+        const char *nm = entry_name(e);
+        int o = 0, col = 0;
+        while (*nm && o < (int)sizeof(wrapped) - 2) {
+            wrapped[o++] = *nm++;
+            if (++col >= 60 && *nm) { wrapped[o++] = '\n'; col = 0; }
+        }
+        wrapped[o] = '\0';
+    }
+
     if (e->is_dir) {
-        sprintf(msg, "Name: %.39s\n\n  <DIR>", e->name);
+        sprintf(msg, "Name:\n%s\n\n  <DIR>", wrapped);
     } else {
         char nbytes[24], kb[24], mb[24], gb[24];
         format_thousands(e->size, nbytes);
         fmt_unit(e->size, SZ_KB, kb);
         fmt_unit(e->size, SZ_MB, mb);
         fmt_unit(e->size, SZ_GB, gb);
-        sprintf(msg, "Name: %.39s\n\n  Bytes: %s\n     KB: %s\n     MB: %s\n     GB: %s",
-                e->name, nbytes, kb, mb, gb);
+        sprintf(msg, "Name:\n%s\n\n  Bytes: %s\n     KB: %s\n     MB: %s\n     GB: %s",
+                wrapped, nbytes, kb, mb, gb);
     }
     dlg_message(L("File details", "Dateidetails"), msg, 0);
     redraw_all();
 }
 
 /* -------------------------------------------------------------------------
- * Alt+F5 - Refresh: re-read the active panel (e.g. to see a new remote file).
+ * F9 - Refresh: re-read the active panel (e.g. to see a new remote file).
  * ---------------------------------------------------------------------- */
 static void do_refresh(void)
 {
@@ -1152,7 +1165,7 @@ static void do_mkdir(void)
 static int delete_one_entry(int on_remote, PanelEntry *e)
 {
     if (on_remote) {
-        return e->is_dir ? g_ftp.remove_dir(e->name) : g_ftp.remove_file(e->name);
+        return e->is_dir ? g_ftp.remove_dir(entry_name(e)) : g_ftp.remove_file(entry_name(e));
     } else {
         char path[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
         join_local(path, (int)sizeof(path), g_left.path(), e->name);
@@ -1170,7 +1183,7 @@ static int delete_one_recursive(int on_remote, PanelEntry *e)
         return delete_one_entry(on_remote, e);
     }
     if (on_remote)
-        return dircopy_delete_remote(&g_ftp, e->name, copy_item, 0);
+        return dircopy_delete_remote(&g_ftp, entry_name(e), copy_item, 0);
     {
         char path[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
         join_local(path, (int)sizeof(path), g_left.path(), e->name);
@@ -1189,7 +1202,7 @@ static int scan_one_entry(int from_remote, PanelEntry *e,
     if (!e->is_dir) { (*nf)++; *bytes += e->size; return FTP_OK; }
     (*nd)++;                              /* the top-level directory itself */
     if (from_remote) {
-        return dircopy_measure_remote(&g_ftp, e->name, nf, nd, bytes);
+        return dircopy_measure_remote(&g_ftp, entry_name(e), nf, nd, bytes);
     } else {
         char path[PANEL_HEADER_MAX + PANEL_NAME_MAX + 4];
         join_local(path, (int)sizeof(path), g_left.path(), e->name);
@@ -1424,7 +1437,7 @@ static void do_rename(void)
                         "Keine FTP-Verbindung.\nMit F2 zuerst verbinden."));
             redraw_all(); return;
         }
-        rc = g_ftp.rename(e->name, newname);
+        rc = g_ftp.rename(entry_name(e), newname);
         if (rc != FTP_OK)
             dlg_error(L("Rename failed", "Umbenennen fehlgeschlagen"), g_ftp.last_error());
         else
@@ -1814,11 +1827,10 @@ int main(int argc, char *argv[])
         case KEY_F6:  do_move(); break;
         case KEY_F7:  do_mkdir(); break;
         case KEY_F8:  do_delete(); break;
-        case KEY_F9:  do_drives(); break;
-        case KEY_ALT_F1: do_drives(); break;   /* secret: same as F9 (for NC veterans) */
+        case KEY_F9:  do_refresh(); break;     /* re-read the active panel            */
+        case KEY_ALT_F1: do_drives(); break;   /* change drive (also shown on the bar) */
         case KEY_ALT_F2: do_detail(); break;   /* full name + size of selected entry  */
         case KEY_ALT_F3: do_sort(); break;     /* sort dialog for the active panel    */
-        case KEY_ALT_F5: do_refresh(); break;  /* re-read the active panel            */
         case KEY_ALT_F6: do_rename(); break;   /* F6 is Move; rename moved to Alt+F6  */
         case KEY_ALT_F9: do_checksum(); break; /* CRC32 + MD5 of the selected file    */
 

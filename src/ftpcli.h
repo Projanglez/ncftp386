@@ -50,7 +50,7 @@ typedef int (*FtpProgressCb)(void *ctx, unsigned long sofar, unsigned long total
 
 
 #define FTP_HOST_MAX    64
-#define FTP_LINE_MAX   256
+#define FTP_LINE_MAX   512   /* must hold a full LIST line incl. long names */
 #define FTP_ERRMSG_MAX 160
 
 
