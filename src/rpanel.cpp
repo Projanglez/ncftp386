@@ -10,7 +10,7 @@
  *          or "... 09:30AM   1234 file.txt"
  * ===========================================================================*/
 #include <string.h>   /* strchr, strncpy, strnicmp, stricmp, memcpy   */
-#include <stdlib.h>   /* qsort, strtoul, atoi                         */
+#include <stdlib.h>   /* strtoul, atoi, malloc                        */
 #include <ctype.h>    /* isdigit, toupper                             */
 #include <dos.h>      /* _dos_getdate, struct dosdate_t               */
 #include <stdio.h>    /* sscanf, sprintf                              */
@@ -305,8 +305,6 @@ void RemotePanel::on_line(void *ctx, const char *line)
 
 void RemotePanel::add_line(const char *line)
 {
-    if (count >= PANEL_MAX_ENTRIES) return;
-
     PanelEntry tmp;
     char full[FTP_LINE_MAX];
     if (!ftp_parse_list_line(line, curYear, &tmp, full, (int)sizeof(full)))
@@ -317,12 +315,16 @@ void RemotePanel::add_line(const char *line)
     if (tmp.name[0] == '.' && tmp.name[1] == '\0') return;
     if (tmp.name[0] == '.' && tmp.name[1] == '.' && tmp.name[2] == '\0') return;
 
+    /* Count every real entry; store only while the buffer has room. */
+    total++;
+
     /* Keep the full name only when it was actually truncated into tmp.name;
      * otherwise tmp.name already is the complete name and fullname stays 0. */
     if (strcmp(full, tmp.name) != 0)
         tmp.fullname = pool_store(full);
 
-    entries[count++] = tmp;
+    if (store->append(&tmp)) count++;
+    else                     truncated = 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -331,15 +333,25 @@ void RemotePanel::add_line(const char *line)
 int RemotePanel::refresh()
 {
     count = 0;
+    total = 0;
+    truncated = 0;
     cursor = 0;
     topentry = 0;
     navFailed = 0;
+    store->reset();
 
     if (!ftp || !ftp->is_connected()) {
         strcpy(header, L("(not connected)", "(nicht verbunden)"));
         cwd[0] = '\0';
         return 0;
     }
+
+    /* Full-name pool for entries whose name exceeds PANEL_NAME_MAX. */
+    if (namePool == 0) {
+        namePool = (char *)malloc(REMOTE_NAME_POOL);
+        poolSize = namePool ? REMOTE_NAME_POOL : 0;
+    }
+    poolUsed = 0;
 
     /* Determine the current path (for the header). */
     if (ftp->get_cwd(cwd, PANEL_HEADER_MAX) != FTP_OK) {
@@ -349,22 +361,16 @@ int RemotePanel::refresh()
 
     curYear = current_year();
 
-    /* (Re)use the full-name pool for this listing. Allocated once, lazily. */
-    if (namePool == 0) {
-        namePool = (char *)malloc(REMOTE_NAME_POOL);
-        poolSize = namePool ? REMOTE_NAME_POOL : 0;
-    }
-    poolUsed = 0;
-
     /* Offer a ".." entry unless we are already at the root directory. */
     {
         int at_root = (cwd[0] == '\0') || (cwd[0] == '/' && cwd[1] == '\0');
         if (!at_root) {
-            PanelEntry *e = &entries[count++];
-            strcpy(e->name, "..");
-            e->size = 0; e->date = 0; e->time = 0;
-            e->is_dir = 1; e->is_parent = 1; e->marked = 0;
-            e->fullname = 0;
+            PanelEntry e;
+            strcpy(e.name, "..");
+            e.size = 0; e.date = 0; e.time = 0;
+            e.is_dir = 1; e.is_parent = 1; e.marked = 0;
+            e.fullname = 0;
+            if (store->append(&e)) count++;
         }
     }
 
@@ -393,13 +399,15 @@ int RemotePanel::enter_selected()
         char leaf[PANEL_NAME_MAX];
         path_leaf(cwd, leaf, sizeof(leaf));
         rc = ftp->parent_dir();
-        refresh();
-        select_by_name(leaf);
+        if (rc == FTP_OK) { refresh(); select_by_name(leaf); }
     } else {
-        rc = ftp->change_dir(e->name);
-        refresh();                   /* lists the new state */
+        /* Use the full name (entry_name), not the truncated display name, so
+         * directories with names longer than PANEL_NAME_MAX still enter. Only
+         * re-list on success - a failed CWD must not yank the cursor to top. */
+        rc = ftp->change_dir(entry_name(e));
+        if (rc == FTP_OK) refresh();
     }
-    if (rc != FTP_OK) navFailed = 1; /* refresh() already reset navFailed */
+    if (rc != FTP_OK) navFailed = 1;
     return 1;
 }
 
@@ -409,7 +417,6 @@ void RemotePanel::go_parent()
     if (!ftp || !ftp->is_connected()) return;
     path_leaf(cwd, leaf, sizeof(leaf));
     int rc = ftp->parent_dir();
-    refresh();
-    select_by_name(leaf);
-    if (rc != FTP_OK) navFailed = 1;
+    if (rc == FTP_OK) { refresh(); select_by_name(leaf); }
+    else              navFailed = 1;
 }

@@ -17,6 +17,7 @@
 #define KEY_BACKSP  0x08
 #define KEY_SPACE   0x20
 #define KEY_CTRL_A  0x01  /* alias for Alt+F2 file detail                        */
+#define KEY_CTRL_F  0x06  /* alias for Alt+F7 search / jump-to-name              */
 #define KEY_CTRL_R  0x12  /* alias for F9 refresh active panel                   */
 #define KEY_CTRL_U  0x15  /* swap panels left<->right (Norton Ctrl-U)            */
 
@@ -48,6 +49,8 @@
 #define KEY_ALT_F2  0x169  /* file detail popup (full name + Bytes/KB/MB/GB)     */
 #define KEY_ALT_F3  0x16A  /* open the sort dialog for the active panel          */
 #define KEY_ALT_F6  0x16D
+#define KEY_ALT_F7  0x16E  /* search / jump to the next name with a prefix       */
+#define KEY_ALT_F8  0x16F  /* toggle full-screen for the active panel            */
 #define KEY_ALT_F9  0x170  /* checksum (CRC32 + MD5) of the selected file        */
 
 /* Numpad keys: unused in the panel context, Norton Commander style.

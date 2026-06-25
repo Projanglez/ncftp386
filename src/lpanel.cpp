@@ -5,8 +5,9 @@
  * ===========================================================================*/
 #include <dos.h>      /* _dos_findfirst/_dos_findnext, _A_* , struct find_t  */
 #include <direct.h>   /* getcwd, chdir                                       */
-#include <string.h>   /* strncpy, strcpy, stricmp                            */
-#include <stdlib.h>   /* qsort                                               */
+#include <string.h>   /* strncpy, strcpy, stricmp, strncat                   */
+#include <stdio.h>    /* sprintf                                             */
+#include <stdlib.h>
 
 #include "lpanel.h"
 
@@ -44,26 +45,31 @@ int LocalPanel::refresh()
     unsigned rc;
 
     count = 0;
+    total = 0;
+    truncated = 0;
+    store->reset();
     read_cwd();
     strncpy(header, cwd, PANEL_HEADER_MAX - 1);
     header[PANEL_HEADER_MAX - 1] = '\0';
 
     rc = _dos_findfirst("*.*", amask, &ff);
-    while (rc == 0 && count < PANEL_MAX_ENTRIES) {
+    while (rc == 0) {
         /* Skip "." (the current directory). */
         if (!(ff.name[0] == '.' && ff.name[1] == '\0')) {
-            PanelEntry *e = &entries[count];
-            strncpy(e->name, ff.name, PANEL_NAME_MAX - 1);
-            e->name[PANEL_NAME_MAX - 1] = '\0';
-            e->fullname  = 0;             /* 8.3 names always fit in 'name' */
-            e->size      = ff.size;
-            e->date      = ff.wr_date;
-            e->time      = ff.wr_time;
-            e->is_dir    = (ff.attrib & _A_SUBDIR) ? 1 : 0;
-            e->is_parent = (ff.name[0] == '.' && ff.name[1] == '.' &&
-                            ff.name[2] == '\0') ? 1 : 0;
-            e->marked    = 0;
-            count++;
+            PanelEntry e;
+            total++;
+            strncpy(e.name, ff.name, PANEL_NAME_MAX - 1);
+            e.name[PANEL_NAME_MAX - 1] = '\0';
+            e.fullname  = 0;             /* 8.3 names always fit in 'name' */
+            e.size      = ff.size;
+            e.date      = ff.wr_date;
+            e.time      = ff.wr_time;
+            e.is_dir    = (ff.attrib & _A_SUBDIR) ? 1 : 0;
+            e.is_parent = (ff.name[0] == '.' && ff.name[1] == '.' &&
+                           ff.name[2] == '\0') ? 1 : 0;
+            e.marked    = 0;
+            if (store->append(&e)) count++;
+            else                   truncated = 1;
         }
         rc = _dos_findnext(&ff);
     }

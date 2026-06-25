@@ -65,7 +65,7 @@ static int hexval(char c)
 }
 
 /* src -> hex(src[i] ^ XKEY[i%klen]). dst must be >= 2*strlen(src)+1. */
-static void obfus_hex(const char *src, char *dst)
+void connsave_obfus(const char *src, char *dst)
 {
     int i, klen = (int)sizeof(XKEY) - 1;
     for (i = 0; src[i]; i++) {
@@ -76,7 +76,7 @@ static void obfus_hex(const char *src, char *dst)
 }
 
 /* hex -> dst (decrypted). Stops cleanly on an invalid character. */
-static void deobfus_hex(const char *hex, char *dst, int dstsz)
+void connsave_deobfus(const char *hex, char *dst, int dstsz)
 {
     int i = 0, o = 0, klen = (int)sizeof(XKEY) - 1;
     while (hex[i] && hex[i + 1] && o < dstsz - 1) {
@@ -122,7 +122,7 @@ int connsave_load(char *host, int hostsz, char *port, int portsz,
         else if (stricmp(key, "user") == 0) { strncpy(user, val, usersz - 1); user[usersz - 1] = 0; }
         else if (stricmp(key, "savepw") == 0) { if (savepw) *savepw = atoi(val) ? 1 : 0; }
         else if (stricmp(key, "swap") == 0) { if (swap) *swap = atoi(val) ? 1 : 0; }
-        else if (stricmp(key, "pass") == 0) { if (val[0]) deobfus_hex(val, pass, passsz); }
+        else if (stricmp(key, "pass") == 0) { if (val[0]) connsave_deobfus(val, pass, passsz); }
         else if (stricmp(key, "startdir")  == 0) { if (ui) { strncpy(ui->startdir, val, sizeof(ui->startdir) - 1); ui->startdir[sizeof(ui->startdir) - 1] = 0; } }
         else if (stricmp(key, "lsortkey")  == 0) { if (ui) ui->lsort_key   = atoi(val); }
         else if (stricmp(key, "lsortdesc") == 0) { if (ui) ui->lsort_desc  = atoi(val) ? 1 : 0; }
@@ -158,7 +158,7 @@ void connsave_store(const char *host, const char *port,
 
     if (savepw && pass && pass[0]) {
         char hex[2 * 64 + 1];
-        obfus_hex(pass, hex);
+        connsave_obfus(pass, hex);
         fprintf(f, "pass=%s\n", hex);
     } else {
         fprintf(f, "pass=\n");

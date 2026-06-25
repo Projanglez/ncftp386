@@ -13,7 +13,7 @@
  * ===========================================================================*/
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>   /* qsort */
+#include <stdlib.h>
 #include <ctype.h>
 
 #include "panel.h"
@@ -98,12 +98,12 @@ static void place(char *out, int off, const char *s, int w, int rightalign)
 /* -------------------------------------------------------------------------
  * Constructor / destructor / geometry
  * ---------------------------------------------------------------------- */
-const Panel *Panel::s_sortctx = 0;
-
 Panel::Panel()
 {
     top = 1; left = 0; height = 21; width = 40;
-    count = 0; cursor = 0; topentry = 0; active = 0;
+    store = &conv;                       /* default backend: conventional memory */
+    count = 0; total = 0; truncated = 0;
+    cursor = 0; topentry = 0; active = 0;
     header[0] = '\0';
     s_key = SORT_NAME; s_desc = 0;
 }
@@ -115,63 +115,9 @@ Panel::~Panel()
 /* -------------------------------------------------------------------------
  * Sorting (configurable per panel)
  * ---------------------------------------------------------------------- */
-/* Extension = the part after the last '.', ignoring a leading dot (so dotfiles
- * have no extension). Returns "" when there is none. */
-static const char *name_ext(const char *name)
-{
-    const char *dot = strrchr(name, '.');
-    if (dot == 0 || dot == name) return "";
-    return dot + 1;
-}
-
-/* Compare two DOS date/time words (already chronological as integers). */
-static int cmp_u(unsigned a, unsigned b)
-{
-    return (a < b) ? -1 : (a > b) ? 1 : 0;
-}
-
-int Panel::sort_compare(const void *a, const void *b)
-{
-    const PanelEntry *ea = (const PanelEntry *)a;
-    const PanelEntry *eb = (const PanelEntry *)b;
-    int key  = s_sortctx ? s_sortctx->s_key  : SORT_NAME;
-    int desc = s_sortctx ? s_sortctx->s_desc : 0;
-    int r;
-
-    /* ".." always first; directories always before files - independent of key. */
-    if (ea->is_parent != eb->is_parent) return ea->is_parent ? -1 : 1;
-    if (ea->is_dir    != eb->is_dir)    return ea->is_dir    ? -1 : 1;
-
-    switch (key) {
-    case SORT_EXT:
-        r = stricmp(name_ext(ea->name), name_ext(eb->name));
-        break;
-    case SORT_SIZE:
-        r = (ea->size < eb->size) ? -1 : (ea->size > eb->size) ? 1 : 0;
-        break;
-    case SORT_DATE:
-        r = cmp_u(ea->date, eb->date);
-        if (r == 0) r = cmp_u(ea->time, eb->time);
-        break;
-    case SORT_TIME:
-        r = cmp_u(ea->time, eb->time);
-        if (r == 0) r = cmp_u(ea->date, eb->date);
-        break;
-    case SORT_NAME:
-    default:
-        r = stricmp(ea->name, eb->name);
-        break;
-    }
-
-    if (desc) r = -r;
-    if (r == 0) r = stricmp(ea->name, eb->name);   /* stable tiebreak by name */
-    return r;
-}
-
 void Panel::sort_entries()
 {
-    s_sortctx = this;
-    qsort(entries, count, sizeof(PanelEntry), sort_compare);
+    store->sort(s_key, s_desc);
 }
 
 void Panel::set_sort(int key, int desc)
@@ -259,13 +205,15 @@ void Panel::move_end()   { cursor = count - 1;        clamp_scroll(); }
 PanelEntry *Panel::selected()
 {
     if (cursor < 0 || cursor >= count) return 0;
-    return &entries[cursor];
+    store->fetch(cursor, &selBuf);
+    return &selBuf;
 }
 
 PanelEntry *Panel::entry_at(int i)
 {
     if (i < 0 || i >= count) return 0;
-    return &entries[i];
+    store->fetch(i, &atBuf);
+    return &atBuf;
 }
 
 void Panel::select_by_name(const char *name)
@@ -273,7 +221,7 @@ void Panel::select_by_name(const char *name)
     int i;
     if (name && name[0]) {
         for (i = 0; i < count; i++) {
-            if (stricmp(entries[i].name, name) == 0) {
+            if (stricmp(store->peek(i)->name, name) == 0) {
                 cursor = i;
                 clamp_scroll();
                 return;
@@ -297,7 +245,7 @@ void Panel::toggle_mark()
     PanelEntry *e  = selected();
 
     if (e && !e->is_parent)
-        e->marked = (unsigned char)(e->marked ? 0 : 1);
+        store->set_marked(cursor, e->marked ? 0 : 1);
 
     cursor++;                    /* like Norton Commander: move on down */
     clamp_scroll();
@@ -315,22 +263,23 @@ void Panel::toggle_mark()
 void Panel::invert_marks()
 {
     int i;
-    for (i = 0; i < count; i++)
-        if (!entries[i].is_parent)
-            entries[i].marked = entries[i].marked ? 0 : 1;
+    for (i = 0; i < count; i++) {
+        const PanelEntry *e = store->peek(i);
+        if (!e->is_parent) store->set_marked(i, e->marked ? 0 : 1);
+    }
     draw();
 }
 
 void Panel::clear_marks()
 {
     int i;
-    for (i = 0; i < count; i++) entries[i].marked = 0;
+    for (i = 0; i < count; i++) store->set_marked(i, 0);
 }
 
 int Panel::marked_count() const
 {
     int i, n = 0;
-    for (i = 0; i < count; i++) if (entries[i].marked) n++;
+    for (i = 0; i < count; i++) if (store->peek(i)->marked) n++;
     return n;
 }
 
@@ -338,15 +287,20 @@ unsigned long Panel::marked_size() const
 {
     unsigned long s = 0;
     int i;
-    for (i = 0; i < count; i++)
-        if (entries[i].marked && !entries[i].is_dir) s += entries[i].size;
+    for (i = 0; i < count; i++) {
+        const PanelEntry *e = store->peek(i);
+        if (e->marked && !e->is_dir) s += e->size;
+    }
     return s;
 }
 
 int Panel::marked_dir_count() const
 {
     int i, n = 0;
-    for (i = 0; i < count; i++) if (entries[i].marked && entries[i].is_dir) n++;
+    for (i = 0; i < count; i++) {
+        const PanelEntry *e = store->peek(i);
+        if (e->marked && e->is_dir) n++;
+    }
     return n;
 }
 
@@ -355,8 +309,9 @@ int Panel::find_entry(const char *name) const
     int i;
     if (name == 0 || name[0] == '\0') return -1;
     for (i = 0; i < count; i++) {
-        if (entries[i].is_parent) continue;
-        if (stricmp(entries[i].name, name) == 0) return i;
+        const PanelEntry *e = store->peek(i);
+        if (e->is_parent) continue;
+        if (stricmp(e->name, name) == 0) return i;
     }
     return -1;
 }
@@ -366,20 +321,36 @@ int Panel::has_entry(const char *name) const
     return find_entry(name) >= 0;
 }
 
+int Panel::find_prefix(const char *prefix, int start) const
+{
+    int i, n;
+    if (prefix == 0 || prefix[0] == '\0') return -1;
+    n = (int)strlen(prefix);
+    if (start < 0) start = 0;
+    for (i = start; i < count; i++)
+        if (strnicmp(entry_name(store->peek(i)), prefix, n) == 0) return i;
+    return -1;
+}
+
 void Panel::compare_mark(const Panel *other)
 {
     int i;
     int other_empty = (other == 0 || other->count == 0);
     for (i = 0; i < count; i++) {
-        PanelEntry *e = &entries[i];
+        const PanelEntry *e = store->peek(i);
+        int           isdir;
+        unsigned long esize;
+        int           idx;
         if (e->is_parent) continue;
-        if (other_empty) { e->marked = 1; continue; }
-        int idx = other->find_entry(e->name);
-        if (idx < 0) {
-            e->marked = 1;
-        } else if (!e->is_dir && other->entries[idx].size != e->size) {
-            e->marked = 1;
-        }
+        if (other_empty) { store->set_marked(i, 1); continue; }
+        /* Capture before touching the other panel's store (separate ring). */
+        isdir = e->is_dir;
+        esize = e->size;
+        idx   = other->find_entry(e->name);   /* e->name: this ring, still valid */
+        if (idx < 0)
+            store->set_marked(i, 1);
+        else if (!isdir && other->store->peek(idx)->size != esize)
+            store->set_marked(i, 1);
     }
     draw();
 }
@@ -463,13 +434,14 @@ void Panel::draw_entry_row(int idx)
     row = top + 4 + rel;
 
     if (idx >= 0 && idx < count) {
+        const PanelEntry *e = store->peek(idx);
         int is_cur = (active && idx == cursor);
-        int is_mk  = entries[idx].marked;
+        int is_mk  = e->marked;
         unsigned char a;
         if (is_cur) a = is_mk ? ATTR_MARKED_SEL : ATTR_SELECTED;
         else        a = is_mk ? ATTR_MARKED     : ATTR_PANEL;
         fill_rect(row, left + 1, 1, inner, ' ', a);
-        format_entry(&entries[idx], buf, inner);
+        format_entry(e, buf, inner);
         draw_text(row, left + 1, buf, a, inner);
     } else {
         fill_rect(row, left + 1, 1, inner, ' ', ATTR_PANEL);

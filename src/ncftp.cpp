@@ -29,10 +29,12 @@
 #include "ftpcli.h"
 #include "keymap.h"
 #include "dialog.h"
+#include "extmem.h"
 #include "viewer.h"
 #include "editor.h"
 #include "dircopy.h"
 #include "connsave.h"
+#include "sites.h"
 #include "checksum.h"
 #include "i18n.h"
 #include "umlaut.h"   /* always include last */
@@ -72,7 +74,13 @@ static int  g_saveconn    = 1;   /* 0 = do not save this session in NCFTP.SAV  *
 static int  g_autoconnect = 0;   /* auto-connect via command line (-h)         */
 static int  g_nosplash    = 0;   /* /Q: skip splash screen                     */
 static int  g_swapped     = 0;   /* Ctrl-U: local panel on the right (saved)   */
+static int  g_fullscreen  = 0;   /* Alt+F8: active panel spans the full width   */
 static int  g_video_pref  = -1;  /* -1 auto, 0 force color, 1 force mono        */
+static int  g_exmem       = 0;   /* /EXMEM: 1 = use extended/expanded memory   */
+static int  g_exmem_pref  = 0;   /* 0 auto, 1 XMS, 2 EMS                        */
+static ExtStore *g_extStore = 0; /* remote panel's XMS/EMS store (when /EXMEM)  */
+
+static void warn_truncated(Panel *p);   /* popup when a listing didn't all fit  */
 
 /* Persisted UI state: FTP start directory + per-pane sort mode (FTP4DOS.SAV).
  * Zero-initialized: empty start dir, both panes use the default sort until the
@@ -117,11 +125,11 @@ static const char *fkey_alt_label(int i)
 {
     static const char *de[10] = {
         "Laufw", "Detail", "Sort", "", "",
-        "Umben", "", "", "Pr" ue "fsum", ""
+        "Umben", "Suchen", "Vollb", "Pr" ue "fsum", ""
     };
     static const char *en[10] = {
         "Drive", "Detail", "Sort", "", "",
-        "Rename", "", "", "ChkSum", ""
+        "Rename", "Search", "Full", "ChkSum", ""
     };
     return g_english ? en[i] : de[i];
 }
@@ -313,6 +321,15 @@ static void redraw_all(void)
  * objects (and thus copy direction / Tab handling) stay the same. */
 static void apply_panel_regions(void)
 {
+    /* Full-screen: the active panel takes the whole width (so long FTP names
+     * are readable); the other panel is given zero width and draws nothing. */
+    if (g_fullscreen && g_active) {
+        Panel *other = (g_active == (Panel *)&g_left) ? (Panel *)&g_right
+                                                      : (Panel *)&g_left;
+        g_active->set_region(PANEL_TOP, 0, PANEL_ROWS, SCREEN_COLS);
+        other->set_region(PANEL_TOP, 0, PANEL_ROWS, 0);
+        return;
+    }
     int lcol = g_swapped ? PANEL_COLS : 0;          /* local panel column  */
     int rcol = g_swapped ? 0          : PANEL_COLS; /* remote panel column */
     g_left.set_region(PANEL_TOP, lcol, PANEL_ROWS, PANEL_COLS);
@@ -441,6 +458,7 @@ static void do_connect(void)
     if (g_startdir_warn)
         flash_status(L(" Start dir not found - connected at root.",
                        " Startverzeichnis nicht gefunden - Wurzel."));
+    warn_truncated((Panel *)&g_right);
 }
 
 /* -------------------------------------------------------------------------
@@ -1094,6 +1112,19 @@ static void do_detail(void)
     redraw_all();
 }
 
+/* If the last listing didn't fit the panel's buffer, tell the user (once per
+ * listing - refresh() clears the flag). Hint at /EXMEM for more room. */
+static void warn_truncated(Panel *p)
+{
+    char msg[200];
+    if (p == 0 || !p->is_truncated()) return;
+    sprintf(msg,
+        L("This directory has %d entries; only the\nfirst %d can be shown.\n\nStart with /EXMEM (XMS/EMS) to list them all.",
+          "Dieses Verzeichnis hat %d Eintr" ae "ge; nur die\nersten %d sind anzeigbar.\n\nMit /EXMEM (XMS/EMS) alle anzeigen."),
+        p->total_count(), p->entry_count());
+    dlg_message(L("Directory truncated", "Verzeichnis gek" ue "rzt"), msg, 0);
+}
+
 /* -------------------------------------------------------------------------
  * F9 - Refresh: re-read the active panel (e.g. to see a new remote file).
  * ---------------------------------------------------------------------- */
@@ -1103,6 +1134,49 @@ static void do_refresh(void)
     g_active->refresh();   /* remote: re-LISTs over FTP; local: re-reads the dir */
     redraw_all();
     flash_status(L(" Refreshed.", " Aktualisiert."));
+    warn_truncated(g_active);
+}
+
+/* -------------------------------------------------------------------------
+ * Alt+F7 / Ctrl+F - Search: jump to the next entry whose name starts with the
+ * typed text. Search starts AFTER the cursor and wraps to the top.
+ * ---------------------------------------------------------------------- */
+static void do_search(void)
+{
+    char buf[80];
+    int  idx;
+    if (g_active == 0) return;
+    buf[0] = '\0';
+    if (!dlg_input(L("Search", "Suchen"),
+                   L("Jump to name starting with:", "Springe zu Name, beginnend mit:"),
+                   buf, (int)sizeof(buf) - 1, 0)) {
+        redraw_all();
+        return;
+    }
+    if (buf[0] == '\0') { redraw_all(); return; }
+
+    idx = g_active->find_prefix(buf, g_active->selected_index() + 1);
+    if (idx < 0) idx = g_active->find_prefix(buf, 0);   /* wrap around to the top */
+
+    redraw_all();
+    if (idx >= 0) {
+        g_active->set_cursor_index(idx);
+        g_active->draw();
+        draw_statusbar();
+    } else {
+        flash_status(L(" Not found.", " Nicht gefunden."));
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Alt+F8 - Full-screen toggle: the active panel uses the whole 80 columns so
+ * long remote file names are readable; toggle again to restore the split view.
+ * ---------------------------------------------------------------------- */
+static void do_fullscreen(void)
+{
+    g_fullscreen = !g_fullscreen;
+    apply_panel_regions();
+    redraw_all();
 }
 
 /* -------------------------------------------------------------------------
@@ -1610,7 +1684,7 @@ static void print_usage(void)
 {
     printf("FTP4DOS v" APP_VERSION " - Dual-Panel FTP Client for DOS\n");
     printf("(c) 2026 Projanglez -- https://github.com/Projanglez/ftp4dos\n\n");
-    printf("Usage: FTP4DOS [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/D:DIR] [/S:ALL|NOPASS|OFF] [/Q] [/MONO|/COLOR]\n");
+    printf("Usage: FTP4DOS [/L:EN|DE] [/H:HOST] [/P:PORT] [/U:USER] [/W:PASS] [/D:DIR] [/S:ALL|NOPASS|OFF] [/EXMEM[:XMS|EMS]] [/Q] [/MONO|/COLOR]\n");
     printf("       ('-' may be used instead of '/'; flags are case-insensitive)\n\n");
     printf("  /L:EN|DE        force English or German user interface\n");
     printf("  /H:HOST         connect to HOST automatically on startup\n");
@@ -1621,6 +1695,8 @@ static void print_usage(void)
     printf("  /S:ALL          save connection incl. password to FTP4DOS.SAV (default)\n");
     printf("  /S:NOPASS       save connection but not the password\n");
     printf("  /S:OFF          do not save this connection\n");
+    printf("  /EXMEM          list very large remote dirs via extended/expanded\n");
+    printf("                  memory (auto: XMS then EMS; force with /EXMEM:XMS or :EMS)\n");
     printf("  /Q              skip splash screen\n");
     printf("  /MONO           force monochrome display (MDA/Hercules)\n");
     printf("  /COLOR          force color display (default: auto-detect)\n");
@@ -1641,6 +1717,7 @@ int main(int argc, char *argv[])
     /* Load the remembered connection (NCFTP.SAV next to the EXE). Fills
      * g_host etc.; if the file is missing, the defaults remain. */
     connsave_init(argv[0]);
+    sites_init(argv[0]);
     connsave_load(g_host, (int)sizeof(g_host), g_portStr, (int)sizeof(g_portStr),
                   g_user, (int)sizeof(g_user), g_pass, (int)sizeof(g_pass),
                   &g_savepw, &g_swapped, &g_ui);
@@ -1699,6 +1776,17 @@ int main(int argc, char *argv[])
             case 'c':       /* /COLOR : force color adapter */
                 g_video_pref = 0;
                 break;
+            case 'e':       /* /EXMEM[:XMS|:EMS] : large remote lists via XMS/EMS */
+                if (strnicmp(o, "exmem", 5) == 0 &&
+                    (o[5] == '\0' || o[5] == ':')) {
+                    g_exmem = 1;
+                    if (o[5] == ':') {
+                        char b = (char)toupper((unsigned char)o[6]);
+                        if      (b == 'X') g_exmem_pref = 1;
+                        else if (b == 'E') g_exmem_pref = 2;
+                    }
+                }
+                break;
             case '?':
                 want_help = 1;
                 break;
@@ -1721,6 +1809,28 @@ int main(int argc, char *argv[])
     g_right.attach(&g_ftp);
 
     tui_init(g_video_pref);
+
+    /* /EXMEM: back the remote panel with XMS/EMS so huge listings fit. The
+     * local panel keeps the standard conventional buffer. */
+    if (g_exmem) {
+        ExtMem *mem = extmem_create(g_exmem_pref);
+        if (mem) {
+            g_extStore = new ExtStore(mem);
+            if (g_extStore && g_extStore->ok()) {
+                g_right.use_store(g_extStore);
+            } else {
+                if (g_extStore) { delete g_extStore; g_extStore = 0; }
+                else            { delete mem; }
+                dlg_message(L("Extended memory", "Erweiterter Speicher"),
+                    L("Could not reserve extended memory.\nUsing the standard list.",
+                      "Erweiterter Speicher nicht reservierbar.\nStandardliste wird verwendet."), 0);
+            }
+        } else {
+            dlg_message(L("Extended memory", "Erweiterter Speicher"),
+                L("XMS/EMS not available.\nUsing the standard list.",
+                  "XMS/EMS nicht verf" ue "gbar.\nStandardliste wird verwendet."), 0);
+        }
+    }
 
     apply_panel_regions();          /* honors g_swapped loaded from FTP4DOS.SAV */
     /* Apply the remembered per-pane sort (if any) before the first refresh;
@@ -1796,17 +1906,23 @@ int main(int argc, char *argv[])
         case KEY_TAB:
             set_active(g_active == (Panel *)&g_left
                        ? (Panel *)&g_right : (Panel *)&g_left);
-            g_left.draw();
-            g_right.draw();
-            draw_statusbar();
+            if (g_fullscreen) {                 /* the newly active panel takes over */
+                apply_panel_regions();
+                redraw_all();
+            } else {
+                g_left.draw();
+                g_right.draw();
+                draw_statusbar();
+            }
             break;
 
         case KEY_CTRL_U:        /* swap panels left<->right (remembered) */
             do_swap_panels();
             break;
 
-        case KEY_CTRL_A: do_detail();  break;  /* alias for Alt+F2 */
-        case KEY_CTRL_R: do_refresh(); break;  /* alias for F9     */
+        case KEY_CTRL_A: do_detail();   break;  /* alias for Alt+F2 */
+        case KEY_CTRL_F: do_search();   break;  /* alias for Alt+F7 */
+        case KEY_CTRL_R: do_refresh();  break;  /* alias for F9     */
 
         case KEY_UP:   g_active->move_step(-1); draw_statusbar(); break;
         case KEY_DOWN: g_active->move_step(+1); draw_statusbar(); break;
@@ -1834,6 +1950,7 @@ int main(int argc, char *argv[])
                 draw_statusbar();
                 if (g_active == (Panel *)&g_right && g_right.nav_failed())
                     flash_status(g_right.last_error());
+                warn_truncated(g_active);
             }
             /* otherwise: file -> view (like F3). */
             else {
@@ -1847,6 +1964,7 @@ int main(int argc, char *argv[])
             draw_statusbar();
             if (g_active == (Panel *)&g_right && g_right.nav_failed())
                 flash_status(g_right.last_error());
+            warn_truncated(g_active);
             break;
 
         /* Function keys. */
@@ -1859,6 +1977,7 @@ int main(int argc, char *argv[])
                   "Tab        Switch active panel\n"
                   "Ctrl+U     Swap left/right panels\n"
                   "Ctrl+A     File details (= Alt+F2)\n"
+                  "Ctrl+F     Search / jump to name (= Alt+F7)\n"
                   "Ctrl+R     Refresh active panel (= F9)\n"
                   "Insert     Mark item (copy/move/delete several)\n"
                   "*          Invert selection\n"
@@ -1872,6 +1991,7 @@ int main(int argc, char *argv[])
                   "Tab        Aktives Panel wechseln\n"
                   "Strg+U     Panels tauschen\n"
                   "Strg+A     Dateidetails (= Alt+F2)\n"
+                  "Strg+F     Suchen / zu Name springen (= Alt+F7)\n"
                   "Strg+R     Aktives Panel aktualisieren (= F9)\n"
                   "Einfg      Eintrag markieren (mehrere kop./versch./l" oe "schen)\n"
                   "*          Markierung invertieren\n"
@@ -1894,6 +2014,8 @@ int main(int argc, char *argv[])
         case KEY_ALT_F2: do_detail(); break;   /* full name + size of selected entry  */
         case KEY_ALT_F3: do_sort(); break;     /* sort dialog for the active panel    */
         case KEY_ALT_F6: do_rename(); break;   /* F6 is Move; rename moved to Alt+F6  */
+        case KEY_ALT_F7: do_search(); break;   /* jump to next name with a prefix     */
+        case KEY_ALT_F8: do_fullscreen(); break; /* full-screen the active panel      */
         case KEY_ALT_F9: do_checksum(); break; /* CRC32 + MD5 of the selected file    */
 
         case KEY_F10:

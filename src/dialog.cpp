@@ -5,6 +5,7 @@
  * ===========================================================================*/
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>   /* malloc/free for the site manager */
 #include <ctype.h>
 #include <time.h>
 
@@ -12,10 +13,16 @@
 #include "tui.h"
 #include "keymap.h"
 #include "i18n.h"
+#include "sites.h"
 #include "umlaut.h"   /* always the last include */
 
 /* Buffer for the saved screen behind the dialog (4000 bytes). */
 static unsigned char dlg_screen[SCREEN_CELLS * 2];
+
+/* The site manager nests the profile editor and the delete-confirm dialog,
+ * which both use dlg_screen; so the manager keeps its own save buffer to
+ * restore the real underlying screen when it finally closes. */
+static unsigned char sites_screen[SCREEN_CELLS * 2];
 
 /* Separate buffer for the progress dialog: it may be open at the same time
  * as a modal dialog (e.g. the overwrite prompt during a running copy
@@ -736,6 +743,292 @@ int dlg_menu(const char *title, const char *const *items, int count, int initial
 }
 
 /* -------------------------------------------------------------------------
+ * Site profile editor: Name + Host/Port/User/Pass/Dir + Save-password
+ * -----------------------------------------------------------------------------
+ * Edits the fields of *s in place. Returns 1 = OK (Name non-empty required),
+ * 0 = Cancel. Used by the site manager for both New and Edit.
+ * ---------------------------------------------------------------------- */
+static int dlg_site_edit(const char *title, Site *s)
+{
+    int cols   = 50;
+    int rows   = 13;
+    int top    = (SCREEN_ROWS - rows) / 2;
+    int left   = (SCREEN_COLS - cols) / 2;
+    int inner  = cols - 4;
+    int fdw    = inner - 6;
+    int fcol   = left + 2 + 6;
+    int NFOCUS = 9;
+    int focus  = 0;
+
+    char *fbufs[6];
+    int   fmaxs[6];
+    EditField efs[6];
+    int   frows[6];
+    const char *flbls[6];
+    int   is_pw[6];
+    int i;
+
+    fbufs[0] = s->name; fmaxs[0] = SITE_NAME_MAX - 1;
+    fbufs[1] = s->host; fmaxs[1] = SITE_HOST_MAX - 1;
+    fbufs[2] = s->port; fmaxs[2] = SITE_PORT_MAX - 1;
+    fbufs[3] = s->user; fmaxs[3] = SITE_USER_MAX - 1;
+    fbufs[4] = s->pass; fmaxs[4] = SITE_PASS_MAX - 1;
+    fbufs[5] = s->dir;  fmaxs[5] = SITE_DIR_MAX  - 1;
+    for (i = 0; i < 6; i++) frows[i] = top + 1 + i;
+
+    flbls[0] = L("Name: ", "Name: ");
+    flbls[1] = "Host: ";
+    flbls[2] = "Port: ";
+    flbls[3] = L("User: ", "User: ");
+    flbls[4] = L("Pass: ", "Pass: ");
+    flbls[5] = L("Dir:  ", "Dir:  ");
+
+    is_pw[0] = 0; is_pw[1] = 0; is_pw[2] = 0;
+    is_pw[3] = 0; is_pw[4] = 1; is_pw[5] = 0;
+
+    for (i = 0; i < 6; i++)
+        editfield_init(&efs[i], fbufs[i], fmaxs[i]);
+
+    int chk_pass = s->savepw ? 1 : 0;
+
+    const char *lbl_ok     = L("OK", "OK");
+    const char *lbl_cancel = L("Cancel", "Abbrechen");
+    int bw_ok     = button_width(lbl_ok);
+    int bw_cancel = button_width(lbl_cancel);
+    int gap       = 4;
+    int btotal    = bw_ok + gap + bw_cancel;
+    int b0        = left + (cols - btotal) / 2;
+
+    unsigned char bg = ATTR_DIALOG_BG;
+    int result = 0;
+
+    save_screen(dlg_screen);
+    draw_dialog_frame(top, left, rows, cols, title, bg);
+
+    for (i = 0; i < 6; i++)
+        draw_text(frows[i], left + 2, flbls[i], bg, 6);
+
+    draw_hsep(top + 7, left, cols, bg, 1);
+    draw_hsep(top + 9, left, cols, bg, 1);
+
+    for (;;) {
+        int k;
+        char tmp[56];
+
+        for (i = 0; i < 6; i++) {
+            int is_focused = (focus == i);
+            unsigned char fa = is_focused ? ATTR_DIALOG_HL : bg;
+            editfield_draw(&efs[i], frows[i], fcol, fdw, fa, is_pw[i], is_focused);
+        }
+
+        /* Cursor only on an active text field (see the dlg_connect note). */
+        show_cursor(focus >= 0 && focus <= 5);
+
+        {
+            unsigned char a6 = (focus == 6) ? ATTR_DIALOG_HL : bg;
+            sprintf(tmp, "[%c] %s", chk_pass ? 'X' : ' ',
+                    L("Save password (insecure)", "Passwort speichern (unsicher)"));
+            fill_rect(top + 8, left + 2, 1, inner, ' ', a6);
+            draw_text(top + 8, left + 2, tmp, a6, inner);
+        }
+
+        draw_button(top + 10, b0,               lbl_ok,     focus == 7);
+        draw_button(top + 10, b0 + bw_ok + gap, lbl_cancel, focus == 8);
+
+        k = readkey();
+
+        if (k == KEY_ESC) { result = 0; break; }
+
+        /* Tab/Down forward, Up/Shift+Tab backward; Right/Left also navigate when
+         * the focus is not a text field (inside a field they move the caret). */
+        if (k == KEY_TAB || k == KEY_DOWN ||
+            (k == KEY_RIGHT && !(focus >= 0 && focus <= 5)))
+        { focus = (focus + 1) % NFOCUS; continue; }
+        if (k == KEY_UP || k == 0x10F ||
+            (k == KEY_LEFT && !(focus >= 0 && focus <= 5)))
+        { focus = (focus + NFOCUS - 1) % NFOCUS; continue; }
+
+        if (focus >= 0 && focus <= 5) {
+            if (k == KEY_ENTER) focus = (focus + 1) % NFOCUS;
+            else                editfield_key(&efs[focus], k);
+        } else if (focus == 6) {
+            if (k == KEY_ENTER || k == ' ') chk_pass = !chk_pass;
+        } else if (focus == 7) {
+            if (k == KEY_ENTER) {
+                if (s->name[0] == '\0') focus = 0;   /* Name is mandatory */
+                else { result = 1; break; }
+            }
+        } else { /* focus == 8 */
+            if (k == KEY_ENTER) { result = 0; break; }
+        }
+    }
+
+    show_cursor(0);
+    restore_screen(dlg_screen);
+
+    if (result) s->savepw = chk_pass;
+    return result;
+}
+
+/* -------------------------------------------------------------------------
+ * Site manager: scrollable list of saved profiles with New/Edit/Delete and
+ * "use this profile". Operates on the caller's connect-dialog field buffers.
+ *
+ * Returns: 0 = closed (buffers unchanged);
+ *          1 = connect now (a profile was loaded and its password is known);
+ *          2 = loaded into the buffers but the password still needs typing.
+ * ---------------------------------------------------------------------- */
+static int dlg_sites(char *host, int host_max, char *port, int port_max,
+                     char *user, int user_max, char *pass, int pass_max,
+                     char *startdir, int startdir_max, int *save_pass)
+{
+    Site *arr;
+    int   count;
+    int   sel = 0, topidx = 0;
+    int   maxvis = 14;
+    int   result = 0;
+    unsigned char bg = ATTR_DIALOG_BG;
+
+    arr = (Site *)malloc(sizeof(Site) * SITE_MAX);
+    if (!arr) {
+        dlg_error(L("Site Manager", "Verbindungsverwaltung"),
+                  L("Out of memory.", "Kein Speicher."));
+        return 0;
+    }
+    count = sites_load(arr, SITE_MAX);
+
+    save_screen(sites_screen);
+
+    for (;;) {
+        int cols = 64;
+        int left = (SCREEN_COLS - cols) / 2;
+        int inner = cols - 4;
+        int vis  = (count < 1) ? 1 : count;
+        int rows, top, i, k;
+
+        if (vis > maxvis) vis = maxvis;
+        rows = vis + 4;
+        top  = (SCREEN_ROWS - rows) / 2;
+
+        /* Keep the selection inside the scroll window. */
+        if (sel < 0) sel = 0;
+        if (sel > count - 1) sel = count - 1;
+        if (sel < 0) sel = 0;
+        if (sel < topidx)         topidx = sel;
+        if (sel >= topidx + vis)  topidx = sel - vis + 1;
+        if (topidx < 0) topidx = 0;
+
+        draw_dialog_frame(top, left, rows, cols,
+                          L("Site Manager", "Verbindungsverwaltung"), bg);
+
+        if (count == 0) {
+            const char *hint = L("No sites - press Ins to add.",
+                                 "Keine Eintraege - Ins zum Anlegen.");
+            int hl = (int)strlen(hint);
+            draw_text(top + 1, left + 2 + (inner - hl) / 2, hint, bg, hl);
+        } else {
+            for (i = 0; i < vis; i++) {
+                int idx = topidx + i;
+                unsigned char a = (idx == sel) ? ATTR_DIALOG_HL : bg;
+                char rowbuf[64];
+                fill_rect(top + 1 + i, left + 2, 1, inner, ' ', a);
+                if (idx < count) {
+                    sprintf(rowbuf, "%-30.30s %.24s", arr[idx].name, arr[idx].host);
+                    draw_text(top + 1 + i, left + 2, rowbuf, a, inner);
+                }
+            }
+        }
+
+        draw_hsep(top + vis + 1, left, cols, bg, 1);
+        {
+            const char *foot = L("Enter=Connect  Ins=New  F4=Edit  Del=Delete  Esc=Close",
+                                 "Enter=Verbinden  Ins=Neu  F4=Edit  Entf=Loesch  Esc=Zur" ue "ck");
+            draw_text(top + vis + 2, left + 2, foot, bg, inner);
+        }
+
+        k = readkey();
+
+        if (k == KEY_ESC) { result = 0; break; }
+        else if (k == KEY_UP)    { if (sel > 0) sel--; }
+        else if (k == KEY_DOWN)  { if (sel < count - 1) sel++; }
+        else if (k == KEY_HOME)  { sel = 0; }
+        else if (k == KEY_END)   { sel = count - 1; }
+        else if (k == KEY_PGUP)  { sel -= vis; if (sel < 0) sel = 0; }
+        else if (k == KEY_PGDN)  { sel += vis; if (sel > count - 1) sel = count - 1; }
+        else if (k == KEY_INS) {
+            if (count < SITE_MAX) {
+                /* Pre-fill from the connect dialog's current fields so the user
+                 * can save the connection they already typed without re-entering
+                 * it. Name is left empty (mandatory) for them to fill in. */
+                Site ns;
+                memset(&ns, 0, sizeof(ns));
+                strncpy(ns.host, host, SITE_HOST_MAX - 1);
+                strncpy(ns.port, port[0] ? port : "21", SITE_PORT_MAX - 1);
+                strncpy(ns.user, user, SITE_USER_MAX - 1);
+                strncpy(ns.pass, pass, SITE_PASS_MAX - 1);
+                strncpy(ns.dir,  startdir, SITE_DIR_MAX - 1);
+                ns.savepw = (save_pass && *save_pass) ? 1 : 0;
+                if (dlg_site_edit(L("New Site", "Neue Verbindung anlegen"), &ns)) {
+                    arr[count] = ns;
+                    sel = count;
+                    count++;
+                    sites_store(arr, count);
+                }
+            } else {
+                dlg_error(L("Site Manager", "Verbindungsverwaltung"),
+                          L("Maximum number of sites reached.",
+                            "Maximale Anzahl erreicht."));
+            }
+        }
+        else if (k == KEY_F4) {
+            if (count > 0) {
+                Site tmp = arr[sel];
+                if (dlg_site_edit(L("Edit Site", "Verbindung bearbeiten"), &tmp)) {
+                    arr[sel] = tmp;
+                    sites_store(arr, count);
+                }
+            }
+        }
+        else if (k == KEY_DEL) {
+            if (count > 0 &&
+                dlg_confirm(L("Delete Site", "Verbindung loeschen"),
+                            L("Remove the selected site?",
+                              "Ausgewaehlte Verbindung entfernen?"))) {
+                int j;
+                for (j = sel; j < count - 1; j++) arr[j] = arr[j + 1];
+                count--;
+                if (sel > count - 1) sel = count - 1;
+                if (sel < 0) sel = 0;
+                sites_store(arr, count);
+            }
+        }
+        else if (k == KEY_ENTER) {
+            if (count > 0) {
+                Site *s = &arr[sel];
+                strncpy(host, s->host, host_max);          host[host_max] = '\0';
+                strncpy(port, s->port, port_max);          port[port_max] = '\0';
+                strncpy(user, s->user, user_max);          user[user_max] = '\0';
+                strncpy(pass, s->pass, pass_max);          pass[pass_max] = '\0';
+                strncpy(startdir, s->dir, startdir_max);   startdir[startdir_max] = '\0';
+                if (save_pass) *save_pass = s->savepw ? 1 : 0;
+                result = s->savepw ? 1 : 2;
+                break;
+            }
+        }
+        else if (k >= 0x20 && k < 0x7F && count > 0) {
+            /* Jump to the first profile whose name starts with this letter. */
+            int up = toupper((unsigned char)k);
+            for (i = 0; i < count; i++)
+                if (toupper((unsigned char)arr[i].name[0]) == up) { sel = i; break; }
+        }
+    }
+
+    restore_screen(sites_screen);
+    free(arr);
+    return result;
+}
+
+/* -------------------------------------------------------------------------
  * FTP connect form: Host/Port/User/Pass + save checkboxes
  *
  * Layout (cols=50, rows=12):
@@ -749,12 +1042,14 @@ int dlg_menu(const char *title, const char *const *items, int count, int initial
  *  Row 7:  [X] Save connection data
  *  Row 8:  [ ] Save password (insecure)
  *  Row 9:  divider
- *  Row 10: buttons [ Connect ]  [ Cancel ]
+ *  Row 10: buttons [ Connect ] [ Manage... ] [ Cancel ]
  *  Row 11: bottom border
  *
  * Focus order: Host(0) Port(1) User(2) Pass(3) Dir(4)
- *              chk_save(5) chk_pass(6) btn_ok(7) btn_cancel(8)
+ *              chk_save(5) chk_pass(6) btn_ok(7) btn_sites(8) btn_cancel(9)
  * Tab/Down forward, Up backward. Space/Enter on a checkbox toggles it.
+ * The Sites button opens the site manager (dlg_sites), which may fill the
+ * fields from a saved profile and request an immediate connect.
  * ---------------------------------------------------------------------- */
 int dlg_connect(const char *title,
                 char *host, int host_max,
@@ -772,7 +1067,7 @@ int dlg_connect(const char *title,
     int inner  = cols - 4;          /* usable inner area                     */
     int fdw    = inner - 6;         /* field display width: inner - "Host: " */
     int fcol   = left + 2 + 6;      /* left edge of the input fields         */
-    int NFOCUS = 9;
+    int NFOCUS = 10;
     int focus  = (host[0] != '\0') ? 7 : 0;  /* pre-filled: focus Connect directly */
 
     /* Text fields */
@@ -806,14 +1101,18 @@ int dlg_connect(const char *title,
     int chk_pass = *save_pass;
     if (!chk_save) chk_pass = 0;
 
-    /* Buttons */
+    /* Buttons: [ Connect ] [ Manage... ] [ Cancel ] */
     const char *lbl_ok     = L("Connect", "Verbinden");
+    const char *lbl_sites  = L("Manage...", "Verwalten...");
     const char *lbl_cancel = L("Cancel", "Abbrechen");
     int bw_ok     = button_width(lbl_ok);
+    int bw_sites  = button_width(lbl_sites);
     int bw_cancel = button_width(lbl_cancel);
-    int gap       = 4;
-    int btotal    = bw_ok + gap + bw_cancel;
+    int gap       = 2;
+    int btotal    = bw_ok + gap + bw_sites + gap + bw_cancel;
     int b0        = left + (cols - btotal) / 2;
+    int b_sites   = b0 + bw_ok + gap;
+    int b_cancel  = b_sites + bw_sites + gap;
 
     unsigned char bg = ATTR_DIALOG_BG;
     int result = 0;
@@ -861,18 +1160,23 @@ int dlg_connect(const char *title,
         }
 
         /* Buttons */
-        draw_button(top + 10, b0,               lbl_ok,     focus == 7);
-        draw_button(top + 10, b0 + bw_ok + gap, lbl_cancel, focus == 8);
+        draw_button(top + 10, b0,       lbl_ok,     focus == 7);
+        draw_button(top + 10, b_sites,  lbl_sites,  focus == 8);
+        draw_button(top + 10, b_cancel, lbl_cancel, focus == 9);
 
         k = readkey();
 
         if (k == KEY_ESC) { result = 0; break; }
 
-        /* Forward navigation */
-        if (k == KEY_TAB || k == KEY_DOWN)
+        /* Forward navigation: Tab/Down always; Right when not in a text field
+         * (inside a field, Right moves the caret). */
+        if (k == KEY_TAB || k == KEY_DOWN ||
+            (k == KEY_RIGHT && !(focus >= 0 && focus <= 4)))
         { focus = (focus + 1) % NFOCUS; continue; }
-        /* Backward navigation (Up or Shift+Tab = 0x10F) */
-        if (k == KEY_UP || k == 0x10F)
+        /* Backward navigation: Up/Shift+Tab (0x10F) always; Left when not in a
+         * text field. */
+        if (k == KEY_UP || k == 0x10F ||
+            (k == KEY_LEFT && !(focus >= 0 && focus <= 4)))
         { focus = (focus + NFOCUS - 1) % NFOCUS; continue; }
 
         /* Focus-specific input */
@@ -889,7 +1193,18 @@ int dlg_connect(const char *title,
                 chk_pass = !chk_pass;
         } else if (focus == 7) {
             if (k == KEY_ENTER) { result = 1; break; }
-        } else { /* focus == 8 */
+        } else if (focus == 8) {
+            if (k == KEY_ENTER || k == ' ') {
+                int rc = dlg_sites(host, host_max, port, port_max,
+                                   user, user_max, pass, pass_max,
+                                   startdir, startdir_max, &chk_pass);
+                /* The buffers may have changed - rebuild the edit fields. */
+                for (i = 0; i < 5; i++)
+                    editfield_init(&efs[i], fbufs[i], fmaxs[i]);
+                if (rc == 1)      { result = 1; break; }   /* connect now      */
+                else if (rc == 2) { focus = 3; }           /* type the password */
+            }
+        } else { /* focus == 9 */
             if (k == KEY_ENTER) { result = 0; break; }
         }
     }

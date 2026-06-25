@@ -46,4 +46,11 @@ void connsave_store(const char *host, const char *port,
                     const char *user, const char *pass, int savepw, int swap,
                     const UiState *ui);
 
+/* Light XOR(+hex) password obfuscation, shared with the site manager.
+ * Not real encryption - only hides the plain text in the save files.
+ *   connsave_obfus:   src -> hex; dst must hold >= 2*strlen(src)+1 chars.
+ *   connsave_deobfus: hex -> dst (<= dstsz-1 chars); stops on invalid hex. */
+void connsave_obfus(const char *src, char *dst);
+void connsave_deobfus(const char *hex, char *dst, int dstsz);
+
 #endif /* CONNSAVE_H */

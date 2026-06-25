@@ -10,16 +10,16 @@
  * refresh() is purely virtual: the local panel reads the DOS filesystem,
  * the FTP panel the remote LIST output. Everything else is shared here.
  *
- * Memory note: each panel object contains the entry array directly
- * (~25 KB). When linking (step 3), set -zt<n> as needed so Open Watcom
- * places the large objects in FAR data segments and DGROUP (64 KB) doesn't
- * overflow.
+ * Storage is delegated to an EntryStore (see entrystore.h): the default
+ * ConvStore is a fixed inline array (~28 KB), so each panel object is large -
+ * the link step uses -zt<n> to place it in a FAR data segment. With /EXMEM the
+ * remote panel swaps in an ExtStore (XMS/EMS) for much larger listings.
  * ===========================================================================*/
 #ifndef PANEL_H
 #define PANEL_H
 
 #define PANEL_NAME_MAX    40   /* holds local 8.3 AND longer FTP names        */
-#define PANEL_MAX_ENTRIES 512  /* max. entries per directory                  */
+#define PANEL_MAX_ENTRIES 512  /* fixed conventional buffer (default storage) */
 #define PANEL_HEADER_MAX  80   /* path/title line (DOS path max. ~64+drive)   */
 
 /* A directory entry (POD - re-sortable via qsort). */
@@ -45,6 +45,8 @@ inline const char *entry_name(const PanelEntry *e)
 {
     return e->fullname ? e->fullname : e->name;
 }
+
+#include "entrystore.h"   /* EntryStore / ConvStore / ExtStore (needs PanelEntry) */
 
 class Panel {
 public:
@@ -87,6 +89,12 @@ public:
     int         selected_index() const { return cursor; }
     int         entry_count()    const { return count; }
 
+    /* Truncation status: a directory can hold more entries than fit in the
+     * allocated buffer. is_truncated() is 1 then; total_count() is how many
+     * entries the directory actually had. */
+    int         is_truncated()  const { return truncated; }
+    int         total_count()   const { return total; }
+
     /* --- Sorting (configurable, per panel) --- */
     /* Sort keys for set_sort(). ".." stays first and directories stay grouped
      * before files regardless of key/direction; the key orders within a group. */
@@ -106,6 +114,10 @@ public:
 
     /* Entry by index (0 if outside the valid range). */
     PanelEntry *entry_at(int i);
+
+    /* Index of the first entry at index >= start whose (full) name begins with
+     * 'prefix' (case-insensitive), or -1. Used by the search / jump-to feature. */
+    int find_prefix(const char *prefix, int start) const;
 
     /* --- Multi-selection (Norton Commander style, Insert key) --- */
     /* Toggle the mark on the current entry and move the cursor down.
@@ -128,6 +140,10 @@ public:
     /* Panel title/path line (local: directory, remote: FTP path). */
     const char *title() const { return header; }
 
+    /* Swap in an alternative entry store (e.g. an ExtStore for /EXMEM). The
+     * panel does NOT own it. Call before the first refresh(). */
+    void use_store(EntryStore *s) { store = s; }
+
 protected:
     /* Index of the entry with this name (-1 = not found, case-insensitive).
      * Internal helper for has_entry and compare_mark. */
@@ -135,9 +151,17 @@ protected:
     /* --- Screen region --- */
     int top, left, height, width;
 
-    /* --- Content --- */
-    PanelEntry entries[PANEL_MAX_ENTRIES];
+    /* --- Content ---
+     * Entries live in 'store' (ConvStore by default, ExtStore under /EXMEM).
+     * 'conv' is the inline default backend; 'store' points at it unless
+     * use_store() swaps in another. selBuf/atBuf back selected()/entry_at(). */
+    ConvStore   conv;
+    EntryStore *store;
+    PanelEntry  selBuf;     /* stable buffer returned by selected()             */
+    PanelEntry  atBuf;      /* stable buffer returned by entry_at()             */
     int        count;       /* number of valid entries              */
+    int        total;       /* entries the directory actually had (>= count)    */
+    unsigned char truncated;/* 1 = more entries existed than fit                */
     int        cursor;      /* index of the selected entry          */
     int        topentry;    /* index of the first visible entry     */
     int        active;      /* 1 = active panel                     */
@@ -152,7 +176,7 @@ protected:
     void clamp_scroll();         /* adjust topentry so the cursor is visible */
     void draw_entry_row(int idx);/* redraw just one entry row (idx)        */
     void format_entry(const PanelEntry *e, char *out, int inner) const;
-    /* Sort entries[] by the current mode (subclasses call this in refresh()). */
+    /* Sort the store by the current mode (subclasses call this in refresh()). */
     void sort_entries();
     virtual unsigned char frame_attr() const;  /* border color (overridable) */
     /* Display case convention: 1 = Norton style (UPPERCASE directories,
@@ -160,12 +184,6 @@ protected:
      * the Norton convention; the FTP panel overrides this to 0 because Unix
      * servers are case-sensitive (see RemotePanel). */
     virtual int nc_case() const;
-
-private:
-    /* Configurable qsort comparator. Reads s_sortctx (set by sort_entries()
-     * just before qsort) since a C qsort callback gets no instance pointer. */
-    static const Panel *s_sortctx;
-    static int sort_compare(const void *a, const void *b);
 };
 
 #endif /* PANEL_H */
